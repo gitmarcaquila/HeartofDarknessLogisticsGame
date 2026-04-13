@@ -46,6 +46,14 @@ export interface RiverNode {
   instability: number
   influence: number
   isCapital?: boolean
+  // Port-level corruption: fraction of each delivery skimmed before entering stockpile.
+  // Reduced by a stationed logistics officer. Boosted by nativeInfluence.
+  corruptionRate: number
+  // Competing local authority (0–100). Higher = more corruption drag, slower loyalty gain,
+  // faster instability. Drifts toward Company influence slowly over time.
+  nativeInfluence: number
+  // Flavour name of the local faction (undefined = no active native presence)
+  nativeFactionName?: string
 }
 
 export type FlowDirection = 'downstream' | 'upstream' | 'bidirectional'
@@ -87,10 +95,12 @@ export const SHIP_CAPACITY: Record<ShipType, number> = {
 }
 
 // Progress per tick along an edge (modified by edge resistance)
+// BALANCE HISTORY: barge was 0.10 before 2026-03-30 (too slow for interior run;
+// 120-unit hold never compensated for the extra time over a steamer)
 export const SHIP_SPEED: Record<ShipType, number> = {
   canoe: 0.25,
   steamer: 0.18,
-  barge: 0.10,
+  barge: 0.14,
 }
 
 export const SHIP_BUILD_TICKS: Record<ShipType, number> = {
@@ -182,6 +192,50 @@ export interface BuildOrder {
   totalTicks: number
 }
 
+// ─── Company Revenue & Export Convoys ─────────────────────────────────────────
+
+// A convoy dispatched from origin carrying rubber/ivory to market.
+// Revenue arrives after EXPORT_CONVOY_TRANSIT_TICKS.
+export interface ConvoyOrder {
+  id: string
+  rubber: number
+  ivory: number
+  revenueDue: number
+  ticksRemaining: number
+}
+
+// Revenue cost (Company Revenue currency) to commission a new ship
+export const SHIP_REVENUE_COST: Record<ShipType, number> = {
+  canoe:   10,
+  steamer: 30,
+  barge:   60,
+}
+
+// Food consumed per active (non-unassigned) ship per tick — drained from origin
+export const SHIP_UPKEEP_FOOD: Record<ShipType, number> = {
+  canoe:   0.05,
+  steamer: 0.15,
+  barge:   0.25,
+}
+
+// Base demand rates (per population per tick) — food + medicine only.
+// Ammo demand is strategically set per node (not population-driven).
+// Origin is excluded — it produces rather than demands.
+export const DEMAND_RATE_PER_POP: Partial<Record<NodeType, Partial<ResourceStock>>> = {
+  confluence: { food: 0.020 },
+  outpost:    { food: 0.028, medicine: 0.011 },
+  settlement: { food: 0.028, medicine: 0.011 },
+  chokepoint: { food: 0.050, medicine: 0.011 }, // military post — elevated food premium
+}
+
+// Export convoy timing and values
+export const EXPORT_CONVOY_INTERVAL      = 60  // ticks between convoy departures
+export const EXPORT_CONVOY_TRANSIT_TICKS = 40  // ticks for a convoy to return with Revenue
+export const RUBBER_REVENUE_VALUE        = 2   // Revenue per unit of rubber exported
+export const IVORY_REVENUE_VALUE         = 5   // Revenue per unit of ivory exported
+export const MAX_CONVOY_RUBBER           = 80  // max rubber loaded per convoy
+export const MAX_CONVOY_IVORY            = 40  // max ivory loaded per convoy
+
 // ─── Game State ───────────────────────────────────────────────────────────────
 
 export type OverlayMode = 'trade' | 'influence' | 'instability' | 'personnel'
@@ -196,6 +250,10 @@ export interface GameState {
   ships: Record<string, Ship>
   routes: Record<string, TradeRoute>
   buildQueue: BuildOrder[]
+  // Company Revenue — earned from export convoys; spent on new ships
+  companyRevenue: number
+  // Convoys currently en route to market; arrive with Revenue after transit
+  pendingConvoys: ConvoyOrder[]
   selectedNodeId: string | null
   selectedEdgeId: string | null
   selectedShipId: string | null

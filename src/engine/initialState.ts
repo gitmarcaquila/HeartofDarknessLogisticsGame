@@ -1,4 +1,4 @@
-import { GameState, EMPTY_STOCK, SHIP_CAPACITY } from './types'
+import { GameState, EMPTY_STOCK, SHIP_CAPACITY, ConvoyOrder } from './types'
 
 export const INITIAL_STATE: GameState = {
   tick: 0,
@@ -8,6 +8,8 @@ export const INITIAL_STATE: GameState = {
   selectedShipId: null,
   overlayMode: 'trade',
   buildQueue: [],
+  companyRevenue: 0,
+  pendingConvoys: [] as ConvoyOrder[],
 
   // ─── Nodes ──────────────────────────────────────────────────────────────────
   nodes: {
@@ -16,7 +18,8 @@ export const INITIAL_STATE: GameState = {
       name: 'Company Station',
       type: 'origin',
       position: { x: 600, y: 80 },
-      production: { ...EMPTY_STOCK(), food: 40, medicine: 20, ammunition: 10 },
+      // BALANCE: medicine reduced 20→6 on 2026-04-13 (/heft: 11.2× surplus, never scarce)
+      production: { ...EMPTY_STOCK(), food: 40, medicine: 6, ammunition: 10 },
       demand: EMPTY_STOCK(),
       stockpile: { food: 200, medicine: 100, rubber: 0, ivory: 0, ammunition: 60 },
       population: 120,
@@ -26,6 +29,8 @@ export const INITIAL_STATE: GameState = {
       instability: 5,
       influence: 95,
       isCapital: true,
+      corruptionRate: 0.02,
+      nativeInfluence: 0,
     },
     'confluence': {
       id: 'confluence',
@@ -41,6 +46,8 @@ export const INITIAL_STATE: GameState = {
       loyalty: 70,
       instability: 20,
       influence: 60,
+      corruptionRate: 0.06,
+      nativeInfluence: 10,
     },
     'leopoldville': {
       id: 'leopoldville',
@@ -56,6 +63,9 @@ export const INITIAL_STATE: GameState = {
       loyalty: 60,
       instability: 35,
       influence: 45,
+      corruptionRate: 0.12,
+      nativeInfluence: 25,
+      nativeFactionName: 'Kongo Traders',
     },
     'gorge': {
       id: 'gorge',
@@ -63,14 +73,21 @@ export const INITIAL_STATE: GameState = {
       type: 'chokepoint',
       position: { x: 790, y: 460 },
       production: EMPTY_STOCK(),
-      demand: { ...EMPTY_STOCK(), food: 1.2, ammunition: 0.4 },
-      stockpile: { ...EMPTY_STOCK(), food: 32, ammunition: 12 },
+      // BALANCE: ammo demand raised from 0.4 → 1.2 on 2026-03-30 (military post
+      // in hostile territory; ammo was never a constraint before this change)
+      demand: { ...EMPTY_STOCK(), food: 1.2, ammunition: 1.2 },
+      // BALANCE: ammo stockpile raised 12→60 on 2026-04-13 (/heft: tick-10 crisis with no
+      // assigned ships; 60 units = 50 ticks runway for player to respond)
+      stockpile: { ...EMPTY_STOCK(), food: 32, ammunition: 60 },
       population: 20,
       officers: [],
       morale: 55,
       loyalty: 65,
       instability: 40,
       influence: 40,
+      corruptionRate: 0.18,
+      nativeInfluence: 42,
+      nativeFactionName: 'Bangala Traders',
     },
     'upriver': {
       id: 'upriver',
@@ -78,7 +95,9 @@ export const INITIAL_STATE: GameState = {
       type: 'settlement',
       position: { x: 830, y: 640 },
       production: { ...EMPTY_STOCK(), ivory: 8, rubber: 5 },
-      demand: { ...EMPTY_STOCK(), food: 1.6, medicine: 0.64 },
+      // BALANCE: ammo demand added at 0.5 on 2026-03-30 (was 0; remote camp
+      // now requires ammunition supply to maintain security)
+      demand: { ...EMPTY_STOCK(), food: 1.6, medicine: 0.64, ammunition: 0.5 },
       stockpile: { ...EMPTY_STOCK(), food: 45, medicine: 18 },
       population: 55,
       officers: [],
@@ -86,6 +105,9 @@ export const INITIAL_STATE: GameState = {
       loyalty: 45,
       instability: 55,
       influence: 25,
+      corruptionRate: 0.24,
+      nativeInfluence: 58,
+      nativeFactionName: 'Mongo Elders',
     },
     'innerstation': {
       id: 'innerstation',
@@ -101,6 +123,9 @@ export const INITIAL_STATE: GameState = {
       loyalty: 35,
       instability: 70,
       influence: 15,
+      corruptionRate: 0.35,
+      nativeInfluence: 68,
+      nativeFactionName: 'Forest Confederation',
     },
   },
 
@@ -178,16 +203,19 @@ export const INITIAL_STATE: GameState = {
       dockedTicksRemaining: 1,
       recentlyUnloaded: {},
     },
+    // BALANCE: ship_2 pre-assigned to route_supply on 2026-03-30 (was unassigned;
+    // one ship could not cover Léopoldville's demand over a 42-tick cycle)
     'ship_2': {
       id: 'ship_2', name: 'Le Pionnier', type: 'steamer',
-      state: 'unassigned',
+      state: 'docked_loading',
       locationNodeId: 'origin',
       edgeProgress: 0,
-      routeNodeIndex: 0,
+      assignedRouteId: 'route_supply',
+      routeNodeIndex: 1,
       routeDirection: 1,
       cargo: EMPTY_STOCK(),
       capacity: SHIP_CAPACITY.steamer,
-      dockedTicksRemaining: 0,
+      dockedTicksRemaining: 2,
       recentlyUnloaded: {},
     },
     'ship_3': {
@@ -212,7 +240,7 @@ export const INITIAL_STATE: GameState = {
       name: 'Main Supply Run',
       // One-way path — ships reverse automatically at Léopoldville
       nodePath: ['origin', 'confluence', 'leopoldville'],
-      shipIds: ['ship_1'],
+      shipIds: ['ship_1', 'ship_2'],
       cargoPriorities: {
         food: 'high',
         medicine: 'high',

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useGameStore } from '../store/gameStore'
-import { RiverNode, RiverEdge, Ship, ResourceType, CargoPriority, RESOURCE_TYPES, SHIP_BUILD_TICKS, SHIP_BUILD_COST, SHIP_CAPACITY } from '../engine/types'
+import { RiverNode, RiverEdge, Ship, ResourceType, CargoPriority, RESOURCE_TYPES, SHIP_BUILD_TICKS, SHIP_BUILD_COST, SHIP_CAPACITY, SHIP_REVENUE_COST } from '../engine/types'
 
 // ─── Shared primitives ────────────────────────────────────────────────────────
 
@@ -247,16 +247,20 @@ const SHIP_NAMES = [
 ]
 
 function ShipyardPanel() {
-  const buildQueue = useGameStore(s => s.buildQueue)
-  const nodes      = useGameStore(s => s.nodes)
-  const startBuild = useGameStore(s => s.startBuild)
-  const cancelBuild = useGameStore(s => s.cancelBuild)
+  const buildQueue      = useGameStore(s => s.buildQueue)
+  const nodes           = useGameStore(s => s.nodes)
+  const companyRevenue  = useGameStore(s => s.companyRevenue)
+  const pendingConvoys  = useGameStore(s => s.pendingConvoys)
+  const startBuild      = useGameStore(s => s.startBuild)
+  const cancelBuild     = useGameStore(s => s.cancelBuild)
   const [nameIdx, setNameIdx] = useState(0)
 
   const origin = nodes['origin']
   const canAfford = (type: 'canoe' | 'steamer' | 'barge') => {
-    const cost = { canoe: { food: 5 }, steamer: { food: 15, ammunition: 8 }, barge: { food: 25, rubber: 10 } }[type]
-    return Object.entries(cost).every(([r, v]) => (origin?.stockpile[r as ResourceType] ?? 0) >= v)
+    const resourceCost = { canoe: { food: 5 }, steamer: { food: 15, ammunition: 8 }, barge: { food: 25, rubber: 10 } }[type]
+    const revenueCost  = SHIP_REVENUE_COST[type]
+    return companyRevenue >= revenueCost &&
+      Object.entries(resourceCost).every(([r, v]) => (origin?.stockpile[r as ResourceType] ?? 0) >= v)
   }
 
   const queue = () => {
@@ -265,26 +269,53 @@ function ShipyardPanel() {
     return name
   }
 
+  const SHIP_DEFS = [
+    { type: 'canoe'   as const, label: 'War Canoe',      detail: 'Cap 20 · 3 days · 5 food'           },
+    { type: 'steamer' as const, label: 'River Steamer',  detail: 'Cap 60 · 8 days · 15 food, 8 ammo'  },
+    { type: 'barge'   as const, label: 'Heavy Barge',    detail: 'Cap 120 · 15 days · 25 food, 10 rubber' },
+  ]
+
   return (
     <>
       <SectionLabel>Shipyard</SectionLabel>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-        {([['canoe', 'War Canoe', 'Cap 20 · 3 days · 5 food'],
-           ['steamer', 'River Steamer', 'Cap 60 · 8 days · 15 food, 8 ammo'],
-           ['barge', 'Heavy Barge', 'Cap 120 · 15 days · 25 food, 10 rubber']] as const).map(([type, label, cost]) => (
-          <div key={type} style={{ padding: '6px 8px', background: '#111827', borderRadius: 4, border: '1px solid #1f2937' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div>
-                <div style={{ fontSize: 11, color: '#e5e7eb' }}>{label}</div>
-                <div style={{ fontSize: 10, color: '#6b7280' }}>{cost}</div>
+        {SHIP_DEFS.map(({ type, label, detail }) => {
+          const affordable = canAfford(type)
+          const revCost = SHIP_REVENUE_COST[type]
+          return (
+            <div key={type} style={{ padding: '6px 8px', background: '#111827', borderRadius: 4, border: '1px solid #1f2937' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                <div>
+                  <div style={{ fontSize: 11, color: '#e5e7eb' }}>{label}</div>
+                  <div style={{ fontSize: 10, color: '#6b7280' }}>{detail}</div>
+                  <div style={{ fontSize: 10, color: companyRevenue >= revCost ? '#f59e0b' : '#7f1d1d', marginTop: 2 }}>
+                    ₪ {revCost} Revenue
+                  </div>
+                </div>
+                <PillBtn onClick={() => { if (affordable) startBuild(type, queue()) }}>
+                  {affordable ? 'Build' : 'Can\'t afford'}
+                </PillBtn>
               </div>
-              <PillBtn onClick={() => { if (canAfford(type)) startBuild(type, queue()) }}>
-                {canAfford(type) ? 'Build' : 'Can\'t afford'}
-              </PillBtn>
             </div>
-          </div>
-        ))}
+          )
+        })}
       </div>
+
+      {pendingConvoys.length > 0 && (
+        <>
+          <SectionLabel>Export Convoys En Route</SectionLabel>
+          {pendingConvoys.map(convoy => (
+            <div key={convoy.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 11, marginBottom: 4, padding: '4px 8px', background: '#1f2937', borderRadius: 3 }}>
+              <span style={{ color: '#9ca3af' }}>
+                {convoy.rubber > 0 && `🌿 ${convoy.rubber} `}
+                {convoy.ivory  > 0 && `🦷 ${convoy.ivory}`}
+              </span>
+              <span style={{ color: '#f59e0b' }}>+₪ {convoy.revenueDue}</span>
+              <span style={{ color: '#6b7280' }}>{convoy.ticksRemaining}t</span>
+            </div>
+          ))}
+        </>
+      )}
 
       {buildQueue.length > 0 && (
         <>
@@ -324,17 +355,50 @@ function NodePanel({ node }: { node: RiverNode }) {
         const prod  = node.production[r]
         const dem   = node.demand[r]
         if (stock === 0 && prod === 0 && dem === 0) return null
+        // Days of supply: ticks until stockpile hits zero at current net burn rate
+        const netBurn = dem - prod
+        const daysLeft = netBurn > 0 ? Math.floor(stock / netBurn) : null
+        const daysColor = daysLeft === null ? '#6b7280'
+          : daysLeft < 10 ? '#ef4444'
+          : daysLeft < 25 ? '#f59e0b'
+          : '#10b981'
         return (
           <div key={r} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 3 }}>
             <span style={{ color: '#9ca3af' }}>{RESOURCE_LABELS[r]}</span>
-            <span style={{ color: '#e5e7eb' }}>
-              {stock}
-              {prod > 0 && <span style={{ color: '#10b981', marginLeft: 4 }}>+{prod}</span>}
-              {dem  > 0 && <span style={{ color: '#ef4444', marginLeft: 2 }}>-{dem}</span>}
+            <span style={{ color: '#e5e7eb', display: 'flex', gap: 6, alignItems: 'center' }}>
+              {prod > 0 && <span style={{ color: '#10b981' }}>+{prod}</span>}
+              {dem  > 0 && <span style={{ color: '#ef4444' }}>-{dem}</span>}
+              <span>{stock}</span>
+              {daysLeft !== null && (
+                <span style={{ color: daysColor, fontSize: 9 }}>{daysLeft}d</span>
+              )}
             </span>
           </div>
         )
       })}
+
+      {node.nativeInfluence > 0 && (
+        <>
+          <SectionLabel>Local Authority</SectionLabel>
+          <div style={{ marginBottom: 6 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: '#9ca3af', marginBottom: 2 }}>
+              <span>{node.nativeFactionName ?? 'Native Presence'}</span>
+              <span style={{ color: node.nativeInfluence > 50 ? '#ef4444' : node.nativeInfluence > 25 ? '#f59e0b' : '#6b7280' }}>
+                {Math.round(node.nativeInfluence)}
+              </span>
+            </div>
+            <div style={{ height: 4, background: '#1f2937', borderRadius: 2 }}>
+              <div style={{ height: '100%', width: `${node.nativeInfluence}%`, background: '#b45309', borderRadius: 2 }} />
+            </div>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: '#9ca3af', marginBottom: 10 }}>
+            <span>Port corruption</span>
+            <span style={{ color: node.corruptionRate > 0.25 ? '#ef4444' : node.corruptionRate > 0.12 ? '#f59e0b' : '#6b7280' }}>
+              {Math.round(node.corruptionRate * 100)}%
+            </span>
+          </div>
+        </>
+      )}
 
       {nodeOfficers.length > 0 && (
         <>

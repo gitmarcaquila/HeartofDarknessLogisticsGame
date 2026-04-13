@@ -1,8 +1,12 @@
 import {
   GameState, RiverEdge, RiverNode, Ship, TradeRoute,
-  ResourceType, ResourceStock,
+  ResourceType, ResourceStock, ConvoyOrder,
   RESOURCE_TYPES, EMPTY_STOCK, SHIP_CAPACITY, SHIP_SPEED,
-  SHIP_BUILD_TICKS, CargoPriority, BuildOrder, getStockpileCap, getBerthLimit,
+  SHIP_BUILD_TICKS, SHIP_REVENUE_COST, SHIP_UPKEEP_FOOD,
+  DEMAND_RATE_PER_POP,
+  EXPORT_CONVOY_INTERVAL, EXPORT_CONVOY_TRANSIT_TICKS,
+  RUBBER_REVENUE_VALUE, IVORY_REVENUE_VALUE, MAX_CONVOY_RUBBER, MAX_CONVOY_IVORY,
+  CargoPriority, BuildOrder, getStockpileCap, getBerthLimit,
 } from './types'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -119,9 +123,10 @@ function tickTransit(ship: Ship, route: TradeRoute, state: GameState): void {
   const speed = SHIP_SPEED[ship.type] / Math.max(0.5, edge.resistance)
   ship.edgeProgress += speed
 
-  // Random ambush on unstable routes
-  if (edge.instability > 70 && Math.random() < 0.015) {
-    const lostFraction = 0.15 + Math.random() * 0.20
+  // Random ambush on unstable routes — reduced from 1.5%/15–35% to 0.5%/5–15%
+  // Primary cargo loss is now port-level corruption, not transit ambush.
+  if (edge.instability > 70 && Math.random() < 0.005) {
+    const lostFraction = 0.05 + Math.random() * 0.10
     for (const r of RESOURCE_TYPES) {
       const lost = Math.floor(ship.cargo[r] * lostFraction)
       ship.cargo[r] = Math.max(0, ship.cargo[r] - lost)
@@ -174,9 +179,21 @@ function tickUnloading(ship: Ship, route: TradeRoute, state: GameState): void {
   if (node) {
     const cap = getStockpileCap(node.population)
 
+    // Port corruption: a logistics officer stationed here halves the skim rate.
+    // Effective corruption is also boosted by native influence (up to +0.15 extra).
+    const hasLogistics = node.officers.some(id => {
+      const off = state.officers[id]
+      return off?.role === 'logistics' && off.state === 'stationed'
+    })
+    const nativeBoost = (node.nativeInfluence / 100) * 0.15
+    const effectiveCorruption = Math.min(0.6,
+      (node.corruptionRate + nativeBoost) * (hasLogistics ? 0.4 : 1.0)
+    )
+
     // Termini (origin and the far end of the route) receive everything.
-    // Intermediate stops only receive what they need to maintain a ~30-tick buffer —
-    // the rest stays on board for downstream delivery.
+    // Intermediate stops only receive what they need to maintain a ~15-tick buffer.
+    // BALANCE: buffer was 30 ticks before 2026-03-30 (intermediate ports were
+    // hoarding cargo, leaving terminal ports starved).
     const isTerminus =
       ship.locationNodeId === route.nodePath[0] ||
       ship.locationNodeId === route.nodePath[route.nodePath.length - 1]
@@ -187,16 +204,18 @@ function tickUnloading(ship: Ship, route: TradeRoute, state: GameState): void {
       if (isTerminus) {
         toUnload = Math.min(ship.cargo[r], cap - node.stockpile[r])
       } else {
-        const bufferTarget = Math.min(cap, node.demand[r] * 30)
+        const bufferTarget = Math.min(cap, node.demand[r] * 15)
         const need = Math.max(0, bufferTarget - node.stockpile[r])
         toUnload = Math.min(ship.cargo[r], need)
       }
       toUnload = Math.max(0, toUnload)
       if (toUnload > 0) {
-        node.stockpile[r]                  += toUnload
-        ship.cargo[r]                      -= toUnload
-        route.lastTickThroughput[r]        += toUnload
-        ship.recentlyUnloaded[r]            = true   // block reloading same good
+        // Apply corruption tax — skimmed goods simply vanish (stolen before stockpile)
+        const delivered = Math.floor(toUnload * (1 - effectiveCorruption))
+        node.stockpile[r]           += delivered
+        ship.cargo[r]               -= toUnload        // full amount leaves the hold
+        route.lastTickThroughput[r] += delivered
+        ship.recentlyUnloaded[r]     = true
       }
     }
   }
@@ -292,6 +311,77 @@ export function tickBuildQueue(state: GameState): void {
   }
 }
 
+// ─── Demand scaling ───────────────────────────────────────────────────────────
+
+// Recalculate food and medicine demand from population each tick so the
+// economy adapts to any map layout. Ammo demand is strategic and stays fixed.
+function tickDemandScaling(state: GameState): void {
+  for (const node of Object.values(state.nodes)) {
+    const rates = DEMAND_RATE_PER_POP[node.type]
+    if (!rates) continue
+    if (rates.food     !== undefined) node.demand.food     = node.population * rates.food
+    if (rates.medicine !== undefined) node.demand.medicine = node.population * rates.medicine
+  }
+}
+
+// ─── Ship upkeep ──────────────────────────────────────────────────────────────
+
+// Each active (assigned) ship consumes a small amount of food from origin per
+// tick — crew rations. This is separate from port-level demand and creates a
+// natural cap on fleet size relative to food production.
+function tickShipUpkeep(state: GameState): void {
+  const origin = state.nodes['origin']
+  if (!origin) return
+  let totalUpkeep = 0
+  for (const ship of Object.values(state.ships)) {
+    if (ship.state === 'unassigned' || ship.state === 'captured') continue
+    totalUpkeep += SHIP_UPKEEP_FOOD[ship.type]
+  }
+  origin.stockpile.food = Math.max(0, origin.stockpile.food - totalUpkeep)
+}
+
+// ─── Export convoys ───────────────────────────────────────────────────────────
+
+// Every EXPORT_CONVOY_INTERVAL ticks, if origin has rubber or ivory stockpiled,
+// dispatch a Trade Convoy to market. Revenue arrives EXPORT_CONVOY_TRANSIT_TICKS
+// later, simulating the ocean voyage + sale. This gives rubber and ivory a real
+// economic loop: extraction → return shipping → stockpile → convoy → Revenue.
+let _convoyCounter = 0
+function tickExportConvoy(state: GameState): void {
+  // Tick down existing convoys and collect arrivals
+  const arrived: ConvoyOrder[] = []
+  const stillTransit: ConvoyOrder[] = []
+  for (const convoy of state.pendingConvoys) {
+    convoy.ticksRemaining--
+    if (convoy.ticksRemaining <= 0) arrived.push(convoy)
+    else stillTransit.push(convoy)
+  }
+  state.pendingConvoys = stillTransit
+  for (const convoy of arrived) {
+    state.companyRevenue += convoy.revenueDue
+  }
+
+  // Dispatch a new convoy on the interval
+  if (state.tick > 0 && state.tick % EXPORT_CONVOY_INTERVAL === 0) {
+    const origin = state.nodes['origin']
+    if (!origin) return
+    const rubber = Math.min(origin.stockpile.rubber, MAX_CONVOY_RUBBER)
+    const ivory  = Math.min(origin.stockpile.ivory,  MAX_CONVOY_IVORY)
+    if (rubber > 0 || ivory > 0) {
+      origin.stockpile.rubber = Math.max(0, origin.stockpile.rubber - rubber)
+      origin.stockpile.ivory  = Math.max(0, origin.stockpile.ivory  - ivory)
+      const revenueDue = Math.round(rubber * RUBBER_REVENUE_VALUE + ivory * IVORY_REVENUE_VALUE)
+      state.pendingConvoys.push({
+        id:               `convoy_${++_convoyCounter}`,
+        rubber,
+        ivory,
+        revenueDue,
+        ticksRemaining:   EXPORT_CONVOY_TRANSIT_TICKS,
+      })
+    }
+  }
+}
+
 // ─── Instability & morale ─────────────────────────────────────────────────────
 
 function tickInstability(state: GameState): void {
@@ -376,6 +466,44 @@ function tickMorale(state: GameState): void {
   }
 }
 
+// ─── Native influence ─────────────────────────────────────────────────────────
+
+function tickNativeInfluence(state: GameState): void {
+  for (const node of Object.values(state.nodes)) {
+    if (node.nativeInfluence === 0) continue
+
+    // Native influence drifts toward Company influence, very slowly.
+    // Where the Company is strong (influence > nativeInfluence) native authority
+    // erodes. Where Company is weak, native authority grows.
+    // A stationed diplomatic officer doubles the erosion rate.
+    const hasDiplomat = node.officers.some(id => {
+      const off = state.officers[id]
+      return off?.role === 'diplomatic' && off.state === 'stationed'
+    })
+    const diplomacyMultiplier = hasDiplomat ? 2.0 : 1.0
+
+    const gap = node.influence - node.nativeInfluence
+    // Base drift ±0.03/tick; diplomat doubles erosion when Company is ahead
+    const drift = gap > 0
+      ? 0.03 * diplomacyMultiplier   // Company gaining ground
+      : 0.02                         // Native influence growing (slower)
+    node.nativeInfluence = Math.max(0, Math.min(100,
+      node.nativeInfluence - Math.sign(gap) * drift
+    ))
+
+    // Occasional native interference event: small random stockpile drain
+    // Chance scales with native influence and fires only at contested nodes
+    if (node.nativeInfluence > 30 && Math.random() < node.nativeInfluence * 0.0003) {
+      for (const r of RESOURCE_TYPES) {
+        if (node.stockpile[r] > 0) {
+          const drained = Math.floor(node.stockpile[r] * 0.04)
+          node.stockpile[r] = Math.max(0, node.stockpile[r] - drained)
+        }
+      }
+    }
+  }
+}
+
 function tickOfficerTransit(state: GameState): void {
   for (const officer of Object.values(state.officers)) {
     if (officer.state !== 'in_transit') continue
@@ -403,6 +531,8 @@ export function simulateTick(state: GameState): GameState {
     ships: structuredClone(state.ships),
     routes: structuredClone(state.routes),
     buildQueue: structuredClone(state.buildQueue),
+    pendingConvoys: structuredClone(state.pendingConvoys),
+    companyRevenue: state.companyRevenue,
   }
 
   // Reset route throughput each tick
@@ -434,9 +564,13 @@ export function simulateTick(state: GameState): GameState {
     }
   }
 
+  tickDemandScaling(next)
   tickWaitingBerths(next)
   tickInstability(next)
   tickMorale(next)
+  tickNativeInfluence(next)
+  tickShipUpkeep(next)
+  tickExportConvoy(next)
   tickOfficerTransit(next)
 
   return next
@@ -496,6 +630,10 @@ export function actionStartBuild(
   const origin = state.nodes['origin']
   if (!origin) return {}
 
+  // Check Company Revenue
+  const revenueCost = SHIP_REVENUE_COST[shipType]
+  if (state.companyRevenue < revenueCost) return {}
+
   const costMap: Record<string, Partial<ResourceStock>> = {
     canoe:   { food: 5 },
     steamer: { food: 15, ammunition: 8 },
@@ -505,7 +643,7 @@ export function actionStartBuild(
 
   // Check resources
   for (const r of RESOURCE_TYPES) {
-    if (origin.stockpile[r] < (cost[r] ?? 0)) return {}  // not enough resources
+    if (origin.stockpile[r] < (cost[r] ?? 0)) return {}
   }
 
   const nodes = structuredClone(state.nodes)
@@ -521,7 +659,11 @@ export function actionStartBuild(
     totalTicks: SHIP_BUILD_TICKS[shipType],
   }
 
-  return { nodes, buildQueue: [...state.buildQueue, order] }
+  return {
+    nodes,
+    buildQueue: [...state.buildQueue, order],
+    companyRevenue: state.companyRevenue - revenueCost,
+  }
 }
 
 export function actionCancelBuild(state: GameState, orderId: string): Partial<GameState> {

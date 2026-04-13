@@ -39,12 +39,13 @@ function Btn({
 }
 
 export function Toolbar({ onToggleFleet, fleetOpen }: { onToggleFleet: () => void; fleetOpen: boolean }) {
-  const tick = useGameStore(s => s.tick)
-  const speed = useGameStore(s => s.speed)
-  const overlayMode = useGameStore(s => s.overlayMode)
-  const setSpeed = useGameStore(s => s.setSpeed)
+  const tick           = useGameStore(s => s.tick)
+  const speed          = useGameStore(s => s.speed)
+  const overlayMode    = useGameStore(s => s.overlayMode)
+  const companyRevenue = useGameStore(s => s.companyRevenue)
+  const setSpeed       = useGameStore(s => s.setSpeed)
   const setOverlayMode = useGameStore(s => s.setOverlayMode)
-  const ships = useGameStore(s => s.ships)
+  const ships          = useGameStore(s => s.ships)
   const unassignedCount = Object.values(ships).filter(s => s.state === 'unassigned').length
 
   // Resource totals across all nodes
@@ -129,6 +130,15 @@ export function Toolbar({ onToggleFleet, fleetOpen }: { onToggleFleet: () => voi
         <span style={{ color: '#10b981' }}>🌾 {Math.round(totals.food)}</span>
         <span style={{ color: '#a3e635' }}>🌿 {Math.round(totals.rubber)}</span>
         <span style={{ color: '#fbbf24' }}>🦷 {Math.round(totals.ivory)}</span>
+      </div>
+
+      {/* Divider */}
+      <div style={{ width: 1, height: 24, background: '#1f2937' }} />
+
+      {/* Company Revenue */}
+      <div style={{ fontSize: 12, fontFamily: 'monospace', color: '#f59e0b', fontWeight: 700 }}>
+        ₪ {Math.round(companyRevenue)}
+        <span style={{ fontSize: 9, color: '#6b7280', fontWeight: 400, marginLeft: 4 }}>Revenue</span>
       </div>
     </div>
   )

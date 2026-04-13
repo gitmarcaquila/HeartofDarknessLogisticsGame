@@ -300,7 +300,15 @@ Key numbers governing game feel:
 // Ship speeds (progress per tick, before resistance modifier)
 canoe:                  0.25    (~4 ticks on a resistance-1.0 edge)
 steamer:                0.18    (~6 ticks; 14 ticks on Inner Station edge)
-barge:                  0.10    (~10 ticks)
+barge:                  0.14    (~7 ticks) [was 0.10 before 2026-03-30]
+
+// Ship build cost (resources + Company Revenue)
+canoe:   5 food                     + ₪10 Revenue
+steamer: 15 food, 8 ammo            + ₪30 Revenue
+barge:   25 food, 10 rubber         + ₪60 Revenue
+
+// Ship upkeep (food/tick drained from origin per active assigned ship)
+canoe: 0.05    steamer: 0.15    barge: 0.25
 
 // Morale deltas (per tick, flat)
 foodMet:               +0.5    foodNotMet:     -1.5
@@ -322,23 +330,33 @@ influenceDrop:          0.08    when loyalty < 40
 
 // Cargo loading
 protectionBuffer:       40      ticks of own demand protected at source node
-intermediateBuffer:     30      ticks of demand shipped to intermediate stops
-                                (terminus receives everything)
+intermediateBuffer:     15      ticks of demand shipped to intermediate stops
+                                (terminus receives everything) [was 30 before 2026-03-30]
 
 // Edge control (per tick)
 controlGainRate:        0.0125  max gain (75% slower than influence +0.05)
 controlLossRate:        0.006   loss per unit of normalised maxInstability
 breakEvenRatio:         ~2.08   maxInstability / avgInfluence above which control decays
 
-// Demand rates (per tick)
-confluence food:        0.8
-leopoldville food:      2.4     medicine: 0.8
-gorge food:             1.2     ammunition: 0.4
-upriver food:           1.6     medicine: 0.64
-innerstation food:      0.9     medicine: 0.35
+// Demand rates — population-scaled, recalculated each tick (food + medicine only)
+// Ammo is strategic — set per node, not population-driven
+confluence:   food = pop × 0.020
+outpost:      food = pop × 0.028    medicine = pop × 0.011
+settlement:   food = pop × 0.028    medicine = pop × 0.011
+chokepoint:   food = pop × 0.050    medicine = pop × 0.011  (military post premium)
+
+// Gorge starting ammo: 60 [was 12 before 2026-04-13; /heft tick-10 cliff fix]
+// Ammo demand: gorge 1.2/tick [raised from 0.4 on 2026-03-30], upriver 0.5/tick [added 2026-03-30]
 
 // Origin production (per tick)
-food: 40    medicine: 20    ammunition: 10
+food: 40    medicine: 6    ammunition: 10
+// medicine reduced 20→6 on 2026-04-13 (/heft: 11.2× surplus, was never scarce)
+
+// Export convoy (rubber/ivory → Company Revenue)
+convoyInterval:    60 ticks between departures from origin
+convoyTransit:     40 ticks for revenue to arrive (ocean voyage + sale)
+rubberValue:       ₪2 per unit     maxConvoyRubber: 80
+ivoryValue:        ₪5 per unit     maxConvoyIvory:  40
 ```
 
 ---
@@ -352,7 +370,7 @@ food: 40    medicine: 20    ammunition: 10
 - [x] Ship system with full state machine (including waiting_berth)
 - [x] Ping-pong route reversal (ships automatically reverse at terminus)
 - [x] Proportional fair-share cargo loading weighted by downstream demand and priority
-- [x] Partial unloading at intermediate stops (30-tick buffer); full unload at termini
+- [x] Partial unloading at intermediate stops (15-tick buffer); full unload at termini
 - [x] recentlyUnloaded guard — ships do not reload goods they just delivered
 - [x] Node supply buffer — ships cannot strip a node below its own 40-tick demand
 - [x] Berth limits by population level; waiting_berth queue with purple ship icons
@@ -366,12 +384,19 @@ food: 40    medicine: 20    ammunition: 10
 - [x] Edge control driven by endpoint node influence and instability (Option C formula)
 - [x] Edge chokepoint markers
 - [x] Flood state on edges (strands ships)
-- [x] Ambush events on high-instability routes
+- [x] Ambush events on high-instability routes (0.5%/tick, 5–15% cargo loss)
+- [x] Port corruption tax (skims delivery before stockpile; logistics officer reduces by 60%)
+- [x] Native influence drift and random stockpile drain events
+- [x] Days-of-supply readout in port panel (color-coded: red <10d, amber <25d, green)
 - [x] WebGL memory management (destroyChildren before redraw, no ticker render)
 - [x] Directional ship arrowheads — in-transit ships point toward their destination
 - [x] Correct ship position on return legs (departure-node-anchored interpolation)
 - [x] Inner Station node — remotest outpost, 14 ticks from Upriver Camp
 - [x] Interior Run pre-defined route to Inner Station
+- [x] Population-scaled demand (food + medicine recalculated from pop × rate each tick)
+- [x] Ship upkeep — active ships consume food from origin per tick
+- [x] Export convoy system — rubber/ivory at origin dispatched every 60 ticks; Revenue arrives 40 ticks later
+- [x] Company Revenue — earned from export convoys; required (+ resources) to build new ships
 
 ### Planned
 
