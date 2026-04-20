@@ -237,10 +237,26 @@ Any `stationed` officer can be transferred from a node's sidebar panel via a "Tr
 **Why hops, not edge resistance?**
 Officers don't travel by ship — they take whatever path is available (smaller boats, overland, dispatch). Path length is a fair abstraction that's easy to explain. Resistance is a ship/cargo concern, not a personnel concern.
 
+**Recruitment:**
+New officers sail in from Europe via the **Officers panel** (toolbar `👥 Officers` button).
+- **Cost:** 💰 40 Revenue per officer (role chosen at recruitment time)
+- **Arrival:** 20 ticks (voyage from Brussels). During transit the officer is shown as "Sailing from Europe" in the Officers panel and in Company Station's port panel
+- **Starting stats:** morale 60, loyalty 70
+- **Name pool:** historical Belgian Congo era surnames, unique per role. Pool cycles with roman numerals if exhausted (Cmdr. Lemaire II, III, …)
+
+Recruiting costs the same budget line as commissioning ships — a strategic trade between fleet size and administrative reach. A single logistics officer posted at a corrupt port can recover more than 40 💰 worth of skimmed cargo in practice, but only if the player has ships actually delivering there.
+
+**Officers panel (roster UI):**
+Lists every officer split into two groups:
+1. **Stationed** — name, role, current port, generic effect description, and a `Transfer to…` dropdown. Quick to see the whole roster without clicking each port individually.
+2. **In Transit** — name, role, destination (or "Sailing from Europe" for recruits), ticks until arrival.
+
+Below the roster: four `Recruit from Europe` buttons (one per role), each showing the cost and effect.
+
 **Officer fields that exist but are not yet mechanically active:**
 - `officer.morale`, `officer.loyalty` — displayed in flavour but no downstream effect
 - `officer.state === 'sick'` or `'defected'` — never entered by current simulation
-These are reserved for a later pass that adds disease, recruitment, and defection mechanics.
+These are reserved for a later pass that adds disease and defection mechanics.
 
 ### 8. Instability, Control & Route Disruption
 
@@ -499,6 +515,9 @@ ivoryValue:        💰5 per unit     maxConvoyIvory:  40
 - [x] Officer transfer UI — per-officer dropdown in node sidebar; transit time = path hops × 4
 - [x] Incoming officer display — destination node shows officers arriving with ticks remaining
 - [x] Logistics / Military / Diplomatic / Medical officers all have concrete stationed effects
+- [x] Live officer effect numbers in port panel (e.g. "Port skim 24% → 10%")
+- [x] Officers roster panel (toolbar `👥 Officers`) with stationed + in-transit lists
+- [x] Officer recruitment — 💰40 Revenue, 20-tick voyage from Europe, arrives at Company Station
 - [x] Emergency Dispatch — one-way relief canoe to any port in crisis (auto-shown when <10d supply)
 
 ### Planned

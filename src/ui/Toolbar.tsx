@@ -210,9 +210,11 @@ function RevenueTooltip() {
 export function Toolbar({
   onToggleFleet, fleetOpen,
   onToggleShipyard, shipyardOpen,
+  onToggleOfficers, officersOpen,
 }: {
   onToggleFleet: () => void; fleetOpen: boolean
   onToggleShipyard: () => void; shipyardOpen: boolean
+  onToggleOfficers: () => void; officersOpen: boolean
 }) {
   const tick           = useGameStore(s => s.tick)
   const speed          = useGameStore(s => s.speed)
@@ -223,8 +225,10 @@ export function Toolbar({
   const ships          = useGameStore(s => s.ships)
   const buildQueue     = useGameStore(s => s.buildQueue)
   const events         = useGameStore(s => s.economicEvents)
+  const officers       = useGameStore(s => s.officers)
   const unassignedCount = Object.values(ships).filter(s => s.state === 'unassigned').length
   const buildCount      = buildQueue.length
+  const incomingOfficerCount = Object.values(officers).filter(o => o.state === 'in_transit').length
 
   const nodes = useGameStore(s => s.nodes)
   const totals = Object.values(nodes).reduce(
@@ -316,6 +320,21 @@ export function Toolbar({
               display: 'flex', alignItems: 'center', justifyContent: 'center',
               pointerEvents: 'none',
             }}>{buildCount}</span>
+          )}
+        </div>
+
+        {/* Officers button */}
+        <div style={{ position: 'relative' }}>
+          <Btn active={officersOpen} onClick={onToggleOfficers}>👥 Officers</Btn>
+          {incomingOfficerCount > 0 && (
+            <span style={{
+              position: 'absolute', top: -4, right: 0,
+              background: '#06b6d4', color: '#000',
+              borderRadius: '50%', width: 14, height: 14,
+              fontSize: 9, fontWeight: 700,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              pointerEvents: 'none',
+            }}>{incomingOfficerCount}</span>
           )}
         </div>
 

@@ -250,6 +250,18 @@ export const EMERGENCY_DISPATCH_PAYLOAD: Partial<ResourceStock> = {
 // Medical officer morale contribution at stationed node
 export const MEDICAL_OFFICER_MORALE_BONUS = 0.3
 
+// Officer recruitment — officer sails from Europe and arrives at Company Station
+export const RECRUIT_OFFICER_REVENUE_COST = 40
+export const RECRUIT_OFFICER_ARRIVAL_TICKS = 20
+
+// Name pools for newly recruited officers — historical Belgian Congo era
+export const OFFICER_NAME_POOLS: Record<OfficerRole, string[]> = {
+  logistics:  ['Cmdr. Lemaire', 'Cmdr. Descamps', 'Cmdr. Van Coppenolle', 'Cmdr. Delcommune', 'Cmdr. Storms', 'Cmdr. Coquilhat'],
+  military:   ['Lt. Roget', 'Lt. Delvaux', 'Lt. Dhanis', 'Lt. Masui', 'Lt. Fivé', 'Lt. Chaltin'],
+  diplomatic: ['Envoy Cambier', 'Envoy Janssens', 'Envoy Tobback', 'Envoy Wauters', 'Envoy Liebrechts'],
+  medical:    ['Dr. Briart', 'Dr. Sims', 'Dr. Dupont', 'Dr. Courtois', 'Dr. Etienne', 'Dr. Allart'],
+}
+
 // ─── Game State ───────────────────────────────────────────────────────────────
 
 export type OverlayMode = 'trade' | 'influence' | 'instability' | 'personnel'

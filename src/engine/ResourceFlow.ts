@@ -1,6 +1,6 @@
 import {
   GameState, RiverEdge, RiverNode, Ship, TradeRoute,
-  ResourceType, ResourceStock, ConvoyOrder, EconomicEvent,
+  ResourceType, ResourceStock, ConvoyOrder, EconomicEvent, OfficerRole,
   RESOURCE_TYPES, EMPTY_STOCK, SHIP_CAPACITY, SHIP_SPEED,
   SHIP_BUILD_TICKS, SHIP_REVENUE_COST, SHIP_UPKEEP_FOOD,
   DEMAND_RATE_PER_POP,
@@ -9,6 +9,8 @@ import {
   OFFICER_TICKS_PER_HOP,
   EMERGENCY_DISPATCH_REVENUE_COST, EMERGENCY_DISPATCH_PAYLOAD,
   MEDICAL_OFFICER_MORALE_BONUS,
+  RECRUIT_OFFICER_REVENUE_COST, RECRUIT_OFFICER_ARRIVAL_TICKS,
+  OFFICER_NAME_POOLS,
   CargoPriority, BuildOrder, getStockpileCap, getBerthLimit,
 } from './types'
 
@@ -916,6 +918,66 @@ export function actionEmergencyDispatch(
     ships,
     routes,
     companyRevenue: state.companyRevenue - EMERGENCY_DISPATCH_REVENUE_COST,
+  }
+}
+
+// ─── Officer recruitment ──────────────────────────────────────────────────────
+
+let _officerCounter = 100
+function nextOfficerId(): string { return `off_${++_officerCounter}` }
+
+function pickOfficerName(role: OfficerRole, existing: Record<string, { name: string }>): string {
+  const pool  = OFFICER_NAME_POOLS[role]
+  const taken = new Set(Object.values(existing).map(o => o.name))
+  // Prefer an unused name from the pool
+  for (const name of pool) {
+    if (!taken.has(name)) return name
+  }
+  // Pool exhausted — append a numeral to cycle
+  let idx = 2
+  for (;;) {
+    for (const name of pool) {
+      const candidate = `${name} ${toRoman(idx)}`
+      if (!taken.has(candidate)) return candidate
+    }
+    idx++
+  }
+}
+
+function toRoman(n: number): string {
+  const table: [number, string][] = [[10,'X'],[9,'IX'],[5,'V'],[4,'IV'],[1,'I']]
+  let out = ''
+  for (const [v, s] of table) while (n >= v) { out += s; n -= v }
+  return out
+}
+
+export function actionRecruitOfficer(
+  state: GameState, role: OfficerRole
+): Partial<GameState> {
+  if (state.companyRevenue < RECRUIT_OFFICER_REVENUE_COST) return {}
+  if (!state.nodes['origin']) return {}
+
+  const officers = structuredClone(state.officers)
+  const id       = nextOfficerId()
+  const name     = pickOfficerName(role, officers)
+
+  // Officer sails from Europe — represented as in_transit with destinationId: 'origin'.
+  // Shows up in Company Station's panel as "incoming" with ticks remaining.
+  officers[id] = {
+    id,
+    name,
+    role,
+    morale:                 60,
+    loyalty:                70,
+    state:                  'in_transit',
+    locationId:             'origin',  // will be set as stationed once transit completes
+    destinationId:          'origin',
+    transitTicksRemaining:  RECRUIT_OFFICER_ARRIVAL_TICKS,
+  }
+
+  return {
+    officers,
+    companyRevenue: state.companyRevenue - RECRUIT_OFFICER_REVENUE_COST,
   }
 }
 

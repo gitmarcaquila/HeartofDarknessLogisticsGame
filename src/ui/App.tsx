@@ -5,6 +5,7 @@ import { Toolbar } from './Toolbar'
 import { Sidebar } from './Sidebar'
 import { FleetPanel } from './FleetPanel'
 import { ShipyardPanel } from './ShipyardPanel'
+import { OfficersPanel } from './OfficersPanel'
 
 const TICK_INTERVALS: Record<number, number> = {
   0: 0,
@@ -16,6 +17,7 @@ const TICK_INTERVALS: Record<number, number> = {
 export function App() {
   const [fleetOpen,    setFleetOpen]    = useState(false)
   const [shipyardOpen, setShipyardOpen] = useState(false)
+  const [officersOpen, setOfficersOpen] = useState(false)
   const containerRef   = useRef<HTMLDivElement>(null)
   const rendererRef    = useRef<PixiRenderer | null>(null)
   const tickIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -68,13 +70,16 @@ export function App() {
     <div style={{ width: '100%', height: '100%', position: 'relative', fontFamily: 'monospace' }}>
       <div ref={containerRef} style={{ width: '100%', height: '100%' }} />
       <Toolbar
-        onToggleFleet={() => { setFleetOpen(o => !o); setShipyardOpen(false) }}
+        onToggleFleet={() => { setFleetOpen(o => !o); setShipyardOpen(false); setOfficersOpen(false) }}
         fleetOpen={fleetOpen}
-        onToggleShipyard={() => { setShipyardOpen(o => !o); setFleetOpen(false) }}
+        onToggleShipyard={() => { setShipyardOpen(o => !o); setFleetOpen(false); setOfficersOpen(false) }}
         shipyardOpen={shipyardOpen}
+        onToggleOfficers={() => { setOfficersOpen(o => !o); setFleetOpen(false); setShipyardOpen(false) }}
+        officersOpen={officersOpen}
       />
       {fleetOpen    && <FleetPanel    onClose={() => setFleetOpen(false)} />}
       {shipyardOpen && <ShipyardPanel onClose={() => setShipyardOpen(false)} />}
+      {officersOpen && <OfficersPanel onClose={() => setOfficersOpen(false)} />}
       <Sidebar />
     </div>
   )
