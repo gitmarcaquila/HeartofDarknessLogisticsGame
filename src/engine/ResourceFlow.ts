@@ -97,12 +97,21 @@ function loadShipCargo(ship: Ship, sourceNode: RiverNode, route: TradeRoute, sta
   const surplus = (r: ResourceType) =>
     Math.max(0, sourceNode.stockpile[r] - sourceNode.demand[r] * 40)
 
+  // The recently-unloaded guard prevents a ship from grabbing back what it
+  // just delivered at a non-source port. It must NOT block reloads at a
+  // production source — e.g. a ship returning to origin with leftover food
+  // must still be able to load fresh food here, even if the leftover triggered
+  // the guard on arrival. `sourceNode.production[r] > 0` means this port
+  // actually makes the resource; treat it as a legitimate supply source.
+  const guardBlocks = (r: ResourceType): boolean =>
+    ship.recentlyUnloaded[r] === true && (sourceNode.production[r] ?? 0) === 0
+
   // First pass: allocate a proportional fair share to each resource
   let used = RESOURCE_TYPES.reduce((s, r) => s + ship.cargo[r], 0)
   for (const r of RESOURCE_TYPES) {
     const w = weights[r]
     if (!w) continue
-    if (ship.recentlyUnloaded[r]) continue  // don't reload goods just delivered
+    if (guardBlocks(r)) continue
     const fairShare = Math.ceil(ship.capacity * (w / totalWeight))
     const space     = ship.capacity - used
     if (space <= 0) break
@@ -118,7 +127,7 @@ function loadShipCargo(ship: Ship, sourceNode: RiverNode, route: TradeRoute, sta
   for (const r of RESOURCE_TYPES) {
     const p = priorities[r] ?? 'medium'
     if (p !== 'high') continue
-    if (ship.recentlyUnloaded[r]) continue  // don't reload goods just delivered
+    if (guardBlocks(r)) continue
     const space = ship.capacity - used
     if (space <= 0) break
     const load = Math.min(surplus(r), space)
