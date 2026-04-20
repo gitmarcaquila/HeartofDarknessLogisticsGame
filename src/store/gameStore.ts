@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { GameState, GameSpeed, OverlayMode, ResourceType, CargoPriority, OfficerRole } from '../engine/types'
+import { GameState, GameSpeed, OverlayMode, ResourceType, CargoPriority, OfficerRole, ManifestDirection } from '../engine/types'
 import { INITIAL_STATE } from '../engine/initialState'
 import {
   simulateTick,
@@ -13,6 +13,7 @@ import {
   actionTransferOfficer,
   actionEmergencyDispatch,
   actionRecruitOfficer,
+  actionSetManifestValue,
 } from '../engine/ResourceFlow'
 
 type ShipType = 'canoe' | 'steamer' | 'barge'
@@ -38,6 +39,15 @@ interface GameStore extends GameState {
   transferOfficer:   (officerId: string, destinationId: string) => void
   emergencyDispatch: (targetNodeId: string) => void
   recruitOfficer:    (role: OfficerRole) => void
+
+  // Delivery manifest
+  setManifestValue: (
+    routeId: string,
+    direction: ManifestDirection,
+    resource: ResourceType,
+    nodeId: string,
+    value: number | null
+  ) => void
 }
 
 export const useGameStore = create<GameStore>((set, get) => ({
@@ -80,4 +90,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
   recruitOfficer: role =>
     set(state => actionRecruitOfficer(state, role) as GameStore),
+
+  setManifestValue: (routeId, direction, resource, nodeId, value) =>
+    set(state => actionSetManifestValue(state, routeId, direction, resource, nodeId, value) as GameStore),
 }))

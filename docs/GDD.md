@@ -113,10 +113,26 @@ captured            ← lost to hostile event (terminal)
 ```
 
 **Cargo loading logic:**
-Ships load using proportional fair-share allocation weighted by downstream demand and cargo priority. A ship skips any resource it just unloaded at the current stop (`recentlyUnloaded` guard) — this prevents ships from immediately reloading goods they just delivered. Each node also protects a 40-tick buffer of its own supply before allowing ships to take goods.
+Ships load using proportional fair-share allocation weighted by downstream demand and cargo priority. A ship skips any resource it just unloaded at the current stop (`recentlyUnloaded` guard) — unless the current port is the production source for that resource, in which case the guard is bypassed so the ship can reload from origin. Each node also protects a 40-tick buffer of its own supply before allowing ships to take goods.
 
-**Partial unloading at intermediate stops:**
-A ship drops only the quantity needed to top up a node's 30-tick demand buffer. The remainder stays on board for downstream delivery. At termini, all cargo is unloaded.
+**Partial unloading at intermediate stops (auto mode):**
+By default, a ship drops only the quantity needed to top up a node's 15-tick demand buffer. The remainder stays on board for downstream delivery. At termini, all cargo is unloaded.
+
+**Delivery Manifest — per-stop percentage control:**
+Each route has a **Delivery Manifest** that lets the player override auto mode with explicit distribution percentages. For each (resource × intermediate-stop) cell on the forward leg, the player sets a number 0–100 representing the % of that resource's loaded cargo to drop at that stop. The terminus implicitly receives the remainder (100% minus the intermediate sum). Blank cells = auto (demand-weighted share — each stop's % equals its fraction of total downstream demand).
+
+**How the manifest is applied:**
+1. When a ship finishes loading at a leg-start terminus, it computes absolute per-stop targets: `target[stop][resource] = floor(loaded[resource] × percentage / 100)`
+2. Targets are stored on the ship (`ship.manifestTargets`) and persist through the entire leg.
+3. At each intermediate stop, if a target is set for that (stop × resource), the ship unloads up to that amount (capped by the port's stockpile cap). If no target is set, auto logic applies to that cell only.
+4. Targets clear and recompute when the ship starts a new leg (loads at the terminus of the current leg).
+
+**Scope:** MVP applies manifest to the forward leg only (origin → terminus). Return-leg manifest is reserved in the data model (`route.manifest.backward`) but not yet editable in the UI — the return leg uses auto behavior. Expected future use: controlling where rubber/ivory pick-ups and drop-offs happen on the way back.
+
+**Why percentages of loaded cargo (not absolute amounts or % of ship capacity)?**
+- Scale-stable across ship sizes: 15% is 15% of whatever the ship loaded, regardless of canoe/steamer/barge.
+- Resource-independent rows: food distribution doesn't affect medicine distribution — each resource has its own row.
+- Natural terminus handling: any % not allocated to intermediates flows to the terminus.
 
 **Ship types:**
 
@@ -519,6 +535,7 @@ ivoryValue:        💰5 per unit     maxConvoyIvory:  40
 - [x] Officers roster panel (toolbar `👥 Officers`) with stationed + in-transit lists
 - [x] Officer recruitment — 💰40 Revenue, 20-tick voyage from Europe, arrives at Company Station
 - [x] Emergency Dispatch — one-way relief canoe to any port in crisis (auto-shown when <10d supply)
+- [x] Delivery Manifest — per-stop % allocation per resource on forward leg (auto recommendation + manual override)
 
 ### Planned
 

@@ -138,6 +138,11 @@ export interface Ship {
   // Tracks which resources were unloaded at the current stop so the ship
   // doesn't immediately reload the same goods it just delivered.
   recentlyUnloaded: Partial<Record<ResourceType, true>>
+  // Per-trip delivery targets computed from route.manifest when ship departs a
+  // terminus. Keyed by intermediate-stop node id, then resource. Absent stops
+  // or resources fall back to auto-unload logic. Reset each time the ship
+  // loads at a terminus.
+  manifestTargets?: Partial<Record<string, Partial<Record<ResourceType, number>>>>
   // Events
   eventNote?: string
 }
@@ -172,6 +177,19 @@ export function getBerthLimit(population: number): number {
 
 // ─── Trade Routes ─────────────────────────────────────────────────────────────
 
+// Per-resource, per-stop delivery percentages (0-100).
+// Empty / undefined entry for a cell = auto mode (demand-weighted share).
+// Structure is split by leg direction from day one so reverse-direction
+// (return-leg manifest) can be added later without a schema change.
+export type ManifestDirection = 'forward' | 'backward'
+
+export interface RouteManifest {
+  // forward leg: origin → terminus (nodePath[0] → nodePath[length-1])
+  forward?:  Partial<Record<ResourceType, Record<string, number>>>
+  // backward leg: terminus → origin (reserved; not yet surfaced in UI)
+  backward?: Partial<Record<ResourceType, Record<string, number>>>
+}
+
 export interface TradeRoute {
   id: string
   name: string
@@ -179,6 +197,8 @@ export interface TradeRoute {
   nodePath: string[]
   shipIds: string[]
   cargoPriorities: Partial<Record<ResourceType, CargoPriority>>
+  // Per-leg delivery distribution; undefined → full auto behavior everywhere
+  manifest?: RouteManifest
   lastTickThroughput: ResourceStock
 }
 

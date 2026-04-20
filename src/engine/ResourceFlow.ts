@@ -11,6 +11,7 @@ import {
   MEDICAL_OFFICER_MORALE_BONUS,
   RECRUIT_OFFICER_REVENUE_COST, RECRUIT_OFFICER_ARRIVAL_TICKS,
   OFFICER_NAME_POOLS,
+  ManifestDirection,
   CargoPriority, BuildOrder, getStockpileCap, getBerthLimit,
 } from './types'
 
@@ -139,6 +140,47 @@ function loadShipCargo(ship: Ship, sourceNode: RiverNode, route: TradeRoute, sta
   }
 }
 
+// ─── Manifest (per-stop delivery targets) ────────────────────────────────────
+
+// Given a ship that just finished loading at a leg-start terminus, compute
+// absolute delivery targets (in cargo units) for each intermediate stop on
+// that leg, based on the route's manifest percentages. Called from tickLoading
+// only at the start of a leg — intermediate calls are no-ops.
+function computeManifestTargets(ship: Ship, route: TradeRoute): void {
+  const path      = route.nodePath
+  const pathLen   = path.length
+  const forward   = ship.routeDirection === 1
+  const startId   = forward ? path[0] : path[pathLen - 1]
+  const atLegStart = ship.locationNodeId === startId
+  if (!atLegStart) return   // only compute at the start of a leg
+
+  const dir: ManifestDirection = forward ? 'forward' : 'backward'
+  const manifest = route.manifest?.[dir]
+  if (!manifest) {
+    ship.manifestTargets = undefined   // full auto for this leg
+    return
+  }
+
+  // Intermediate stops in travel order (excludes both termini)
+  const travelOrder = forward ? path : [...path].reverse()
+  const intermediate = travelOrder.slice(1, -1)
+
+  const targets: NonNullable<Ship['manifestTargets']> = {}
+  for (const r of RESOURCE_TYPES) {
+    const dist = manifest[r]
+    if (!dist) continue
+    const loaded = ship.cargo[r]
+    if (loaded <= 0) continue
+    for (const stopId of intermediate) {
+      const pct = dist[stopId] ?? 0
+      if (pct <= 0) continue
+      targets[stopId] = targets[stopId] ?? {}
+      targets[stopId]![r] = Math.floor(loaded * (pct / 100))
+    }
+  }
+  ship.manifestTargets = Object.keys(targets).length > 0 ? targets : undefined
+}
+
 // ─── Ship state machine ───────────────────────────────────────────────────────
 
 function tickTransit(ship: Ship, route: TradeRoute, state: GameState): void {
@@ -250,9 +292,17 @@ function tickUnloading(ship: Ship, route: TradeRoute, state: GameState): void {
       if (isTerminus) {
         toUnload = Math.min(ship.cargo[r], cap - node.stockpile[r])
       } else {
-        const bufferTarget = Math.min(cap, node.demand[r] * 15)
-        const need = Math.max(0, bufferTarget - node.stockpile[r])
-        toUnload = Math.min(ship.cargo[r], need)
+        // Manifest override: if the player has set a per-stop target for this
+        // resource, honour it (still clamped by destination stockpile cap).
+        // Otherwise fall back to the 15-tick demand buffer heuristic.
+        const manifestTarget = ship.manifestTargets?.[node.id]?.[r]
+        if (manifestTarget !== undefined) {
+          toUnload = Math.min(ship.cargo[r], manifestTarget, cap - node.stockpile[r])
+        } else {
+          const bufferTarget = Math.min(cap, node.demand[r] * 15)
+          const need = Math.max(0, bufferTarget - node.stockpile[r])
+          toUnload = Math.min(ship.cargo[r], need)
+        }
       }
       toUnload = Math.max(0, toUnload)
       if (toUnload > 0) {
@@ -292,6 +342,11 @@ function tickLoading(ship: Ship, route: TradeRoute, state: GameState): void {
   if (node) {
     loadShipCargo(ship, node, route, state)
   }
+
+  // Compute manifest delivery targets for the leg we're about to start.
+  // Only fires when the ship is at a leg-start terminus; at intermediate
+  // stops this is a no-op and existing targets persist for downstream stops.
+  computeManifestTargets(ship, route)
 
   // Clear the recently-unloaded guard — the ship is departing this port
   ship.recentlyUnloaded = {}
@@ -776,6 +831,49 @@ export function actionSetCargoPriority(
   const routes = structuredClone(state.routes)
   if (!routes[routeId]) return {}
   ;(routes[routeId].cargoPriorities as Record<ResourceType, CargoPriority>)[resource] = priority
+  return { routes }
+}
+
+// Set or clear a manifest cell. Pass null/undefined to revert the cell to auto.
+// Value is a percentage of the resource's loaded cargo for the leg (0-100).
+export function actionSetManifestValue(
+  state: GameState,
+  routeId: string,
+  direction: ManifestDirection,
+  resource: ResourceType,
+  nodeId: string,
+  value: number | null
+): Partial<GameState> {
+  const routes = structuredClone(state.routes)
+  const route  = routes[routeId]
+  if (!route) return {}
+
+  route.manifest = route.manifest ?? {}
+  const byDir: NonNullable<typeof route.manifest.forward> =
+    (route.manifest[direction] ?? {}) as NonNullable<typeof route.manifest.forward>
+  const forResource = byDir[resource] ?? {}
+
+  if (value === null || value === undefined) {
+    delete forResource[nodeId]
+  } else {
+    forResource[nodeId] = Math.max(0, Math.min(100, Math.round(value)))
+  }
+
+  // Prune empties for cleanliness
+  if (Object.keys(forResource).length === 0) {
+    delete byDir[resource]
+  } else {
+    byDir[resource] = forResource
+  }
+  if (Object.keys(byDir).length === 0) {
+    delete route.manifest[direction]
+  } else {
+    route.manifest[direction] = byDir
+  }
+  if (!route.manifest.forward && !route.manifest.backward) {
+    delete route.manifest
+  }
+
   return { routes }
 }
 

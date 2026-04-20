@@ -2,9 +2,177 @@ import { useState } from 'react'
 import { useGameStore } from '../store/gameStore'
 import { ResourceType, CargoPriority, RESOURCE_TYPES, Ship, TradeRoute } from '../engine/types'
 
+// ─── Manifest helpers ─────────────────────────────────────────────────────────
+
+// Demand-share auto recommendation: % of this resource's cargo that should go
+// to each intermediate stop, based on each stop's share of total route demand.
+// Terminus receives the implicit remainder; we return only intermediate values.
+function autoManifestPercent(
+  resource: ResourceType,
+  fullPath: string[],
+  intermediate: string[],
+  nodes: Record<string, { demand: Record<ResourceType, number> }>,
+): Record<string, number> {
+  const totalDemand = fullPath.reduce(
+    (s, id) => s + Math.max(0, nodes[id]?.demand[resource] ?? 0), 0,
+  )
+  const out: Record<string, number> = {}
+  if (totalDemand <= 0) {
+    for (const id of intermediate) out[id] = 0
+    return out
+  }
+  for (const id of intermediate) {
+    const d = Math.max(0, nodes[id]?.demand[resource] ?? 0)
+    out[id] = Math.round((d / totalDemand) * 100)
+  }
+  return out
+}
+
 const RESOURCE_LABELS: Record<ResourceType, string> = {
   food: 'Food', medicine: 'Medicine', rubber: 'Rubber',
   ivory: 'Ivory', ammunition: 'Ammunition',
+}
+
+const RESOURCE_SHORT: Record<ResourceType, string> = {
+  food: '🌾', medicine: '💊', rubber: '🌿', ivory: '🦷', ammunition: '🔫',
+}
+
+// ─── Manifest Grid (forward direction, per-route) ─────────────────────────────
+
+function ManifestGrid({ route }: { route: TradeRoute }) {
+  const nodes       = useGameStore(s => s.nodes)
+  const setManifest = useGameStore(s => s.setManifestValue)
+
+  const fullPath     = route.nodePath
+  const intermediate = fullPath.slice(1, -1)                          // forward-leg intermediates
+  const terminusId   = fullPath[fullPath.length - 1]
+  const manifest     = route.manifest?.forward ?? {}
+
+  if (intermediate.length === 0) {
+    return (
+      <div style={{ fontSize: 10, color: '#4b5563', marginTop: 8 }}>
+        No intermediate stops on this route — all cargo delivered at terminus.
+      </div>
+    )
+  }
+
+  return (
+    <div style={{ marginTop: 8 }}>
+      <div style={{ fontSize: 10, color: '#6b7280', lineHeight: 1.5, marginBottom: 8 }}>
+        % of each loaded resource to drop at each stop (forward leg). Blank = auto (demand share).
+        Terminus ({nodes[terminusId]?.name ?? terminusId}) gets the remainder.
+      </div>
+
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: `70px repeat(${intermediate.length}, minmax(46px, 1fr)) 46px`,
+        gap: 3, fontSize: 10,
+      }}>
+        {/* Header row */}
+        <div />
+        {intermediate.map(id => (
+          <div key={`h${id}`} style={{ color: '#6b7280', textAlign: 'center', fontSize: 9, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+            {nodes[id]?.name.split(' ')[0] ?? id}
+          </div>
+        ))}
+        <div style={{ color: '#f59e0b', textAlign: 'center', fontSize: 9, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+          Term
+        </div>
+
+        {/* One row per resource */}
+        {RESOURCE_TYPES.map(r => {
+          const auto     = autoManifestPercent(r, fullPath, intermediate, nodes)
+          const manual   = manifest[r] ?? {}
+          const rowValues = intermediate.map(id => manual[id] ?? auto[id] ?? 0)
+          const sumInter  = rowValues.reduce((s, v) => s + v, 0)
+          const terminus  = Math.max(0, 100 - sumInter)
+
+          return (
+            <>
+              <div key={`r${r}`} style={{ color: '#9ca3af', display: 'flex', alignItems: 'center', gap: 4 }}>
+                <span>{RESOURCE_SHORT[r]}</span>
+                <span style={{ fontSize: 10 }}>{RESOURCE_LABELS[r]}</span>
+              </div>
+
+              {intermediate.map(id => {
+                const manualValue = manual[id]
+                const autoValue   = auto[id] ?? 0
+                const displayVal  = manualValue ?? ''
+                const isManual    = manualValue !== undefined
+
+                return (
+                  <input
+                    key={`${r}-${id}`}
+                    type="number"
+                    min={0}
+                    max={100}
+                    value={displayVal}
+                    placeholder={String(autoValue)}
+                    onChange={e => {
+                      const raw = e.target.value.trim()
+                      if (raw === '') {
+                        setManifest(route.id, 'forward', r, id, null)
+                      } else {
+                        const n = Number(raw)
+                        if (!Number.isNaN(n)) {
+                          setManifest(route.id, 'forward', r, id, n)
+                        }
+                      }
+                    }}
+                    style={{
+                      background: isManual ? '#1f2937' : '#0d1117',
+                      color: isManual ? '#fbbf24' : '#6b7280',
+                      border: `1px solid ${isManual ? '#fbbf24' : '#374151'}`,
+                      borderRadius: 3,
+                      padding: '2px 4px',
+                      width: '100%',
+                      textAlign: 'center',
+                      fontSize: 10,
+                      fontFamily: 'monospace',
+                      boxSizing: 'border-box',
+                    }}
+                  />
+                )
+              })}
+
+              {/* Terminus remainder (readonly) */}
+              <div style={{
+                textAlign: 'center',
+                padding: '2px 0',
+                color: terminus === 0 ? '#4b5563' : '#f59e0b',
+                fontSize: 10,
+              }}>
+                {terminus}
+              </div>
+            </>
+          )
+        })}
+      </div>
+
+      {/* Reset-to-auto button (only enabled when any manual override is set) */}
+      {Object.keys(manifest).length > 0 && (
+        <div style={{ marginTop: 8, textAlign: 'right' }}>
+          <button
+            onClick={() => {
+              // Clear every manual entry across all resources/stops
+              for (const r of RESOURCE_TYPES) {
+                const entries = manifest[r]
+                if (!entries) continue
+                for (const stopId of Object.keys(entries)) {
+                  setManifest(route.id, 'forward', r, stopId, null)
+                }
+              }
+            }}
+            style={{
+              padding: '3px 10px', fontSize: 10, fontFamily: 'monospace', cursor: 'pointer',
+              borderRadius: 3, background: '#1f2937', color: '#9ca3af', border: '1px solid #374151',
+            }}>
+            Reset all to auto
+          </button>
+        </div>
+      )}
+    </div>
+  )
 }
 
 const PRIORITY_CYCLE: CargoPriority[] = ['high', 'medium', 'low', 'none']
@@ -81,6 +249,30 @@ function ShipRow({ ship, onSelect, onAssign, onRecall, routes }: {
           }}>Recall</button>
         </div>
       )}
+    </div>
+  )
+}
+
+function ManifestToggleSection({ route }: { route: TradeRoute }) {
+  const [expanded, setExpanded] = useState(false)
+  const hasManual = !!route.manifest?.forward && Object.keys(route.manifest.forward).length > 0
+
+  return (
+    <div style={{ marginTop: 12, borderTop: '1px solid #1f2937', paddingTop: 10 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div style={{ fontSize: 10, color: '#6b7280', textTransform: 'uppercase', letterSpacing: 1 }}>
+          Delivery Manifest {hasManual && <span style={{ color: '#fbbf24' }}>●</span>}
+        </div>
+        <button
+          onClick={() => setExpanded(x => !x)}
+          style={{
+            padding: '2px 8px', fontSize: 10, fontFamily: 'monospace', cursor: 'pointer',
+            borderRadius: 3, background: '#1f2937', color: '#9ca3af', border: '1px solid #374151',
+          }}>
+          {expanded ? 'Hide' : hasManual ? 'Edit' : 'Customize'}
+        </button>
+      </div>
+      {expanded && <ManifestGrid route={route} />}
     </div>
   )
 }
@@ -176,6 +368,9 @@ function RouteSection({ route }: { route: TradeRoute }) {
           })}
         </div>
       </div>
+
+      {/* Delivery Manifest — per-stop % allocation (forward leg) */}
+      <ManifestToggleSection route={route} />
 
       {/* Delete route */}
       <div style={{ marginTop: 10, textAlign: 'right' }}>
