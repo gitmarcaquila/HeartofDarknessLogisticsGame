@@ -277,13 +277,6 @@ function CompanyLedger() {
 
 // ─── Officer row (stationed here) ─────────────────────────────────────────────
 
-const ROLE_EFFECT: Record<OfficerRole, string> = {
-  logistics:  'Cuts port corruption 60%',
-  military:   'Suppresses edge instability',
-  diplomatic: 'Erodes native authority 2×',
-  medical:    'Morale +0.3/tick at this port',
-}
-
 const ROLE_COLOR: Record<OfficerRole, string> = {
   logistics:  '#10b981',
   military:   '#ef4444',
@@ -291,25 +284,71 @@ const ROLE_COLOR: Record<OfficerRole, string> = {
   medical:    '#06b6d4',
 }
 
-function StationedOfficerRow({ officer, currentNodeId }: {
+// Compute the live effect this role is providing AT THIS PORT right now.
+// Returns { active: boolean, text: string }. active=false means the role is
+// stationed but has nothing to do here (e.g. diplomat at a port with no natives).
+function liveOfficerEffect(
+  role: OfficerRole,
+  node: RiverNode,
+  edges: Record<string, RiverEdge>,
+): { active: boolean; text: string } {
+  switch (role) {
+    case 'logistics': {
+      const nativeBoost = (node.nativeInfluence / 100) * 0.15
+      const base        = Math.min(0.6, node.corruptionRate + nativeBoost)
+      const withOfficer = base * 0.4
+      if (base < 0.01) return { active: false, text: 'Port not corrupt — no skim to cut' }
+      return {
+        active: true,
+        text: `Port skim ${Math.round(base * 100)}% → ${Math.round(withOfficer * 100)}% on each delivery`,
+      }
+    }
+    case 'military': {
+      const guarded = Object.values(edges).filter(e => e.toId === node.id)
+      if (guarded.length === 0) return { active: false, text: 'No incoming routes to guard' }
+      const atRisk = guarded.filter(e => e.control < 0.5).length
+      const suffix = atRisk > 0 ? ` (${atRisk} at risk, instability being suppressed)` : ''
+      return {
+        active: true,
+        text: `Guards ${guarded.length} incoming route${guarded.length === 1 ? '' : 's'}${suffix}`,
+      }
+    }
+    case 'diplomatic': {
+      if (node.nativeInfluence <= 0) return { active: false, text: 'No native presence to counter' }
+      const gap = node.influence - node.nativeInfluence
+      if (gap > 0) {
+        return { active: true, text: `Eroding ${node.nativeFactionName ?? 'natives'} at 0.06/t (2× base rate)` }
+      }
+      return { active: false, text: `${node.nativeFactionName ?? 'Natives'} gaining — diplomat holding the line` }
+    }
+    case 'medical': {
+      return { active: true, text: 'Morale +0.3/t at this port' }
+    }
+  }
+}
+
+function StationedOfficerRow({ officer, currentNodeId, node }: {
   officer: { id: string; name: string; role: OfficerRole; morale: number; loyalty: number }
   currentNodeId: string
+  node: RiverNode
 }) {
   const nodes           = useGameStore(s => s.nodes)
+  const edges           = useGameStore(s => s.edges)
   const transferOfficer = useGameStore(s => s.transferOfficer)
 
-  const others = Object.values(nodes).filter(n => n.id !== currentNodeId)
+  const others  = Object.values(nodes).filter(n => n.id !== currentNodeId)
+  const effect  = liveOfficerEffect(officer.role, node, edges)
 
   return (
-    <div style={{ marginBottom: 6, padding: '8px 10px', background: '#1f2937', borderRadius: 4, border: `1px solid ${ROLE_COLOR[officer.role]}22` }}>
+    <div style={{ marginBottom: 6, padding: '8px 10px', background: '#1f2937', borderRadius: 4, border: `1px solid ${ROLE_COLOR[officer.role]}33` }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <span style={{ fontSize: 11, color: '#e5e7eb' }}>{officer.name}</span>
         <span style={{ fontSize: 9, color: ROLE_COLOR[officer.role], textTransform: 'uppercase', letterSpacing: 1 }}>
           {officer.role}
         </span>
       </div>
-      <div style={{ fontSize: 9, color: '#6b7280', marginTop: 2 }}>
-        {ROLE_EFFECT[officer.role]}
+      <div style={{ fontSize: 10, color: effect.active ? ROLE_COLOR[officer.role] : '#6b7280', marginTop: 4, lineHeight: 1.4 }}>
+        {effect.active ? '✓ ' : '— '}{effect.text}
       </div>
       <select
         value=""
@@ -455,7 +494,7 @@ function NodePanel({ node }: { node: RiverNode }) {
         <>
           <SectionLabel>Officers</SectionLabel>
           {nodeOfficers.map(off => (
-            <StationedOfficerRow key={off.id} officer={off} currentNodeId={node.id} />
+            <StationedOfficerRow key={off.id} officer={off} currentNodeId={node.id} node={node} />
           ))}
           {incomingOfficers.map(off => (
             <div key={off.id} style={{ marginBottom: 6, padding: '6px 10px', background: '#0d1117', border: '1px dashed #374151', borderRadius: 4 }}>
