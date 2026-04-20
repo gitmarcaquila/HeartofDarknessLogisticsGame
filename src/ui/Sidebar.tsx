@@ -1,6 +1,5 @@
-import { useState } from 'react'
 import { useGameStore } from '../store/gameStore'
-import { RiverNode, RiverEdge, Ship, ResourceType, CargoPriority, RESOURCE_TYPES, SHIP_BUILD_TICKS, SHIP_BUILD_COST, SHIP_CAPACITY, SHIP_REVENUE_COST } from '../engine/types'
+import { RiverNode, RiverEdge, Ship, ResourceType, CargoPriority, RESOURCE_TYPES } from '../engine/types'
 
 // ─── Shared primitives ────────────────────────────────────────────────────────
 
@@ -239,99 +238,44 @@ function RoutePanel({ edge }: { edge: RiverEdge }) {
   )
 }
 
-// ─── Node Panel ───────────────────────────────────────────────────────────────
+// ─── Company Ledger (origin node only) ────────────────────────────────────────
 
-const SHIP_NAMES = [
-  'L\'Avenir', 'Ville de Bruges', 'En Avant', 'Archiduchesse', 'Flandre',
-  'Bruxelles', 'Luebo', 'Kintambo', 'Albertville', 'Commandant',
-]
+function CompanyLedger() {
+  const tick                  = useGameStore(s => s.tick)
+  const totalRubberExported   = useGameStore(s => s.totalRubberExported)
+  const totalIvoryExported    = useGameStore(s => s.totalIvoryExported)
+  const lifetimeRevenueEarned = useGameStore(s => s.lifetimeRevenueEarned)
+  const companyRevenue        = useGameStore(s => s.companyRevenue)
 
-function ShipyardPanel() {
-  const buildQueue      = useGameStore(s => s.buildQueue)
-  const nodes           = useGameStore(s => s.nodes)
-  const companyRevenue  = useGameStore(s => s.companyRevenue)
-  const pendingConvoys  = useGameStore(s => s.pendingConvoys)
-  const startBuild      = useGameStore(s => s.startBuild)
-  const cancelBuild     = useGameStore(s => s.cancelBuild)
-  const [nameIdx, setNameIdx] = useState(0)
-
-  const origin = nodes['origin']
-  const canAfford = (type: 'canoe' | 'steamer' | 'barge') => {
-    const resourceCost = { canoe: { food: 5 }, steamer: { food: 15, ammunition: 8 }, barge: { food: 25, rubber: 10 } }[type]
-    const revenueCost  = SHIP_REVENUE_COST[type]
-    return companyRevenue >= revenueCost &&
-      Object.entries(resourceCost).every(([r, v]) => (origin?.stockpile[r as ResourceType] ?? 0) >= v)
-  }
-
-  const queue = () => {
-    const name = SHIP_NAMES[nameIdx % SHIP_NAMES.length]
-    setNameIdx(i => i + 1)
-    return name
-  }
-
-  const SHIP_DEFS = [
-    { type: 'canoe'   as const, label: 'War Canoe',      detail: 'Cap 20 · 3 days · 5 food'           },
-    { type: 'steamer' as const, label: 'River Steamer',  detail: 'Cap 60 · 8 days · 15 food, 8 ammo'  },
-    { type: 'barge'   as const, label: 'Heavy Barge',    detail: 'Cap 120 · 15 days · 25 food, 10 rubber' },
-  ]
+  // Export rate: exports per 100 ticks, averaged over game duration
+  const perHundred = (v: number) => tick > 0 ? ((v / tick) * 100).toFixed(1) : '0.0'
 
   return (
     <>
-      <SectionLabel>Shipyard</SectionLabel>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-        {SHIP_DEFS.map(({ type, label, detail }) => {
-          const affordable = canAfford(type)
-          const revCost = SHIP_REVENUE_COST[type]
-          return (
-            <div key={type} style={{ padding: '6px 8px', background: '#111827', borderRadius: 4, border: '1px solid #1f2937' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                <div>
-                  <div style={{ fontSize: 11, color: '#e5e7eb' }}>{label}</div>
-                  <div style={{ fontSize: 10, color: '#6b7280' }}>{detail}</div>
-                  <div style={{ fontSize: 10, color: companyRevenue >= revCost ? '#f59e0b' : '#7f1d1d', marginTop: 2 }}>
-                    ₪ {revCost} Revenue
-                  </div>
-                </div>
-                <PillBtn onClick={() => { if (affordable) startBuild(type, queue()) }}>
-                  {affordable ? 'Build' : 'Can\'t afford'}
-                </PillBtn>
-              </div>
-            </div>
-          )
-        })}
+      <SectionLabel>Company Ledger</SectionLabel>
+      <div style={{ padding: '8px 10px', background: '#111827', border: '1px solid #1f2937', borderRadius: 6, marginBottom: 8 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 4 }}>
+          <span style={{ color: '#9ca3af' }}>Treasury</span>
+          <span style={{ color: '#f59e0b', fontWeight: 700 }}>₪ {Math.round(companyRevenue)}</span>
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 4 }}>
+          <span style={{ color: '#9ca3af' }}>Revenue earned</span>
+          <span style={{ color: '#e5e7eb' }}>₪ {Math.round(lifetimeRevenueEarned)}</span>
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 4 }}>
+          <span style={{ color: '#9ca3af' }}>Rubber exported</span>
+          <span style={{ color: '#a3e635' }}>{totalRubberExported} <span style={{ color: '#4b5563', fontSize: 9 }}>({perHundred(totalRubberExported)}/100t)</span></span>
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11 }}>
+          <span style={{ color: '#9ca3af' }}>Ivory exported</span>
+          <span style={{ color: '#fbbf24' }}>{totalIvoryExported} <span style={{ color: '#4b5563', fontSize: 9 }}>({perHundred(totalIvoryExported)}/100t)</span></span>
+        </div>
       </div>
-
-      {pendingConvoys.length > 0 && (
-        <>
-          <SectionLabel>Export Convoys En Route</SectionLabel>
-          {pendingConvoys.map(convoy => (
-            <div key={convoy.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 11, marginBottom: 4, padding: '4px 8px', background: '#1f2937', borderRadius: 3 }}>
-              <span style={{ color: '#9ca3af' }}>
-                {convoy.rubber > 0 && `🌿 ${convoy.rubber} `}
-                {convoy.ivory  > 0 && `🦷 ${convoy.ivory}`}
-              </span>
-              <span style={{ color: '#f59e0b' }}>+₪ {convoy.revenueDue}</span>
-              <span style={{ color: '#6b7280' }}>{convoy.ticksRemaining}t</span>
-            </div>
-          ))}
-        </>
-      )}
-
-      {buildQueue.length > 0 && (
-        <>
-          <SectionLabel>Build Queue</SectionLabel>
-          {buildQueue.map(order => (
-            <div key={order.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 11, marginBottom: 5, padding: '4px 8px', background: '#1f2937', borderRadius: 3 }}>
-              <span style={{ color: '#e5e7eb' }}>{order.shipName}</span>
-              <span style={{ color: '#fbbf24' }}>{order.ticksRemaining} ticks</span>
-              <PillBtn onClick={() => cancelBuild(order.id)} danger>✕</PillBtn>
-            </div>
-          ))}
-        </>
-      )}
     </>
   )
 }
+
+// ─── Node Panel ───────────────────────────────────────────────────────────────
 
 function NodePanel({ node }: { node: RiverNode }) {
   const officers = useGameStore(s => s.officers)
@@ -412,7 +356,7 @@ function NodePanel({ node }: { node: RiverNode }) {
         </>
       )}
 
-      {node.isCapital && <ShipyardPanel />}
+      {node.isCapital && <CompanyLedger />}
     </div>
   )
 }

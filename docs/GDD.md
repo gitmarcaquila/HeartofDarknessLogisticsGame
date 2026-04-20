@@ -257,6 +257,66 @@ Control is not just a counter — it reflects whether the Company actually has a
 
 The canvas is panned by **click-and-drag** on any empty area. Clicks on nodes, ships, or edges open their detail panel — these clicks do not trigger panning (handled via `stopPropagation`).
 
+### 10. HUD & Information Design
+
+The HUD at the top of the screen is the player's economic dashboard. It must communicate state at a glance and expose detail on hover — the player should never have to click into a panel just to answer a routine question like "how much food is where?" or "when is the next convoy due?"
+
+**Toolbar layout (left to right):**
+
+```
+INTO THE CURRENT | Day N | ⏸▶▶▶ | Trade/Influence/Instability/Personnel |
+⛵ Fleet [badge]  ⚒ Shipyard [badge] |
+🌾 Food total   🌿 Rubber total   🦷 Ivory total |
+₪ Company Revenue
+```
+
+**Separation of Fleet and Shipyard:**
+Fleet and Shipyard are distinct mental modes and distinct buttons:
+- **Fleet** = tactical — where are my ships, what are they carrying, where should they go
+- **Shipyard** = strategic — can I afford to grow the fleet, what's the upkeep cost
+
+The Shipyard lives in its own side panel (opened from the toolbar), not as a section inside the Company Station node panel. Commissioning a ship is a frequent, deliberate action that deserves top-level discoverability. Opening Shipyard closes Fleet and vice versa — one panel at a time.
+
+**Badges on Fleet / Shipyard buttons:**
+- Fleet badge: number of unassigned ships (amber)
+- Shipyard badge: number of ships currently in the build queue (yellow)
+
+**HUD tooltips (hover to reveal):**
+
+| Stat | Tooltip content |
+|------|-----------------|
+| 🌾 Food | Per-port rows: Name, Stockpile, Net/tick (green positive / red negative). Only ports with nonzero data are listed. |
+| 🌿 Rubber | Same format — production/stockpile per port. Quickly reveals where extraction is happening vs. where stockpiles are sitting. |
+| 🦷 Ivory | Same as Rubber. |
+| ₪ Revenue | Treasury, lifetime earned, revenue in transit, and a mini-list of up to 5 convoys en route (goods + revenue + ticks remaining). |
+
+Tooltips follow the cursor and dismiss on mouse-leave. Minimum width 220 px; never block more than 340 px of the screen. They are read-only — they do not contain interactive elements. For anything clickable, route the player to Fleet, Shipyard, or the Sidebar.
+
+**Convoy event signaling:**
+Trade convoys departing and arriving are important story beats — they're the moment the extraction economy pays off. Two redundant signals, one kinesthetic and one narrative:
+
+1. **Revenue pulse** — when a convoy arrives, the ₪ counter briefly flashes bright yellow with a glow for ~1.2 seconds. Gives immediate feedback on a numerical change that might otherwise be easy to miss.
+2. **Toast notification** — top-center of the screen, 3–4 seconds, colour-coded:
+   - `convoy_departed` (lime): "Trade Convoy departed with 80 rubber + 40 ivory · ₪360 expected"
+   - `convoy_arrived` (amber): "Convoy returned from market: +₪360 banked"
+
+Events are logged to a rolling 20-item `economicEvents` array in GameState. The toast system watches this array and shows any event it hasn't rendered yet, purging toasts older than 4.5 seconds.
+
+**Company Ledger (Company Station node panel):**
+When the player clicks Company Station, the sidebar shows a "Company Ledger" section with the lifetime import/export record:
+
+| Metric | Meaning |
+|--------|---------|
+| **Treasury** | Current spendable Company Revenue |
+| **Revenue earned** | Lifetime ₪ from completed convoys (does not decay when ships are built) |
+| **Rubber exported** | Lifetime rubber sent out via convoys + rolling rate per 100 ticks |
+| **Ivory exported** | Lifetime ivory sent out via convoys + rolling rate per 100 ticks |
+
+These metrics answer the strategic question *"Is my extraction pipeline profitable relative to what it costs to run?"* Export rate is calculated as `lifetimeTotal / tick × 100` — a game-wide average. Later iterations may move to a rolling-window calculation for a more immediate signal.
+
+**Why information on hover, not on a permanent dashboard?**
+The map + overlay layers are the primary visual channel. A permanent stats dashboard would eat canvas real estate and train the player to read numbers instead of watching ship icons. Tooltips give access on demand without displacing the game view.
+
 ---
 
 ## Map & Nodes
@@ -397,6 +457,10 @@ ivoryValue:        ₪5 per unit     maxConvoyIvory:  40
 - [x] Ship upkeep — active ships consume food from origin per tick
 - [x] Export convoy system — rubber/ivory at origin dispatched every 60 ticks; Revenue arrives 40 ticks later
 - [x] Company Revenue — earned from export convoys; required (+ resources) to build new ships
+- [x] Shipyard as standalone side panel (toolbar button), separated from Company Station click
+- [x] HUD tooltips on resource totals and Revenue (per-port stockpile/net, convoys en route)
+- [x] Convoy event toasts (departed/arrived) + Revenue counter pulse on arrival
+- [x] Company Ledger on Company Station panel: treasury, lifetime earned, lifetime exports, export rate per 100t
 
 ### Planned
 

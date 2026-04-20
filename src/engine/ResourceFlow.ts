@@ -1,6 +1,6 @@
 import {
   GameState, RiverEdge, RiverNode, Ship, TradeRoute,
-  ResourceType, ResourceStock, ConvoyOrder,
+  ResourceType, ResourceStock, ConvoyOrder, EconomicEvent,
   RESOURCE_TYPES, EMPTY_STOCK, SHIP_CAPACITY, SHIP_SPEED,
   SHIP_BUILD_TICKS, SHIP_REVENUE_COST, SHIP_UPKEEP_FOOD,
   DEMAND_RATE_PER_POP,
@@ -8,6 +8,8 @@ import {
   RUBBER_REVENUE_VALUE, IVORY_REVENUE_VALUE, MAX_CONVOY_RUBBER, MAX_CONVOY_IVORY,
   CargoPriority, BuildOrder, getStockpileCap, getBerthLimit,
 } from './types'
+
+const MAX_EVENT_LOG = 20
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -347,6 +349,15 @@ function tickShipUpkeep(state: GameState): void {
 // later, simulating the ocean voyage + sale. This gives rubber and ivory a real
 // economic loop: extraction → return shipping → stockpile → convoy → Revenue.
 let _convoyCounter = 0
+let _eventCounter  = 0
+
+function logEvent(state: GameState, event: Omit<EconomicEvent, 'id'>): void {
+  state.economicEvents.push({ ...event, id: `evt_${++_eventCounter}` })
+  if (state.economicEvents.length > MAX_EVENT_LOG) {
+    state.economicEvents.splice(0, state.economicEvents.length - MAX_EVENT_LOG)
+  }
+}
+
 function tickExportConvoy(state: GameState): void {
   // Tick down existing convoys and collect arrivals
   const arrived: ConvoyOrder[] = []
@@ -358,7 +369,15 @@ function tickExportConvoy(state: GameState): void {
   }
   state.pendingConvoys = stillTransit
   for (const convoy of arrived) {
-    state.companyRevenue += convoy.revenueDue
+    state.companyRevenue        += convoy.revenueDue
+    state.lifetimeRevenueEarned += convoy.revenueDue
+    logEvent(state, {
+      type:    'convoy_arrived',
+      tick:    state.tick,
+      rubber:  convoy.rubber,
+      ivory:   convoy.ivory,
+      revenue: convoy.revenueDue,
+    })
   }
 
   // Dispatch a new convoy on the interval
@@ -377,6 +396,15 @@ function tickExportConvoy(state: GameState): void {
         ivory,
         revenueDue,
         ticksRemaining:   EXPORT_CONVOY_TRANSIT_TICKS,
+      })
+      state.totalRubberExported += rubber
+      state.totalIvoryExported  += ivory
+      logEvent(state, {
+        type:    'convoy_departed',
+        tick:    state.tick,
+        rubber,
+        ivory,
+        revenue: revenueDue,
       })
     }
   }
@@ -531,8 +559,12 @@ export function simulateTick(state: GameState): GameState {
     ships: structuredClone(state.ships),
     routes: structuredClone(state.routes),
     buildQueue: structuredClone(state.buildQueue),
-    pendingConvoys: structuredClone(state.pendingConvoys),
-    companyRevenue: state.companyRevenue,
+    pendingConvoys:        structuredClone(state.pendingConvoys),
+    economicEvents:        structuredClone(state.economicEvents),
+    companyRevenue:        state.companyRevenue,
+    totalRubberExported:   state.totalRubberExported,
+    totalIvoryExported:    state.totalIvoryExported,
+    lifetimeRevenueEarned: state.lifetimeRevenueEarned,
   }
 
   // Reset route throughput each tick

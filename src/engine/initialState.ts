@@ -10,6 +10,10 @@ export const INITIAL_STATE: GameState = {
   buildQueue: [],
   companyRevenue: 0,
   pendingConvoys: [] as ConvoyOrder[],
+  totalRubberExported: 0,
+  totalIvoryExported: 0,
+  lifetimeRevenueEarned: 0,
+  economicEvents: [],
 
   // ─── Nodes ──────────────────────────────────────────────────────────────────
   nodes: {

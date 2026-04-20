@@ -241,6 +241,19 @@ export const MAX_CONVOY_IVORY            = 40  // max ivory loaded per convoy
 export type OverlayMode = 'trade' | 'influence' | 'instability' | 'personnel'
 export type GameSpeed = 0 | 1 | 2 | 3
 
+// ─── Economic Events ──────────────────────────────────────────────────────────
+
+export type EconomicEventType = 'convoy_departed' | 'convoy_arrived'
+
+export interface EconomicEvent {
+  id: string
+  type: EconomicEventType
+  tick: number
+  rubber: number
+  ivory: number
+  revenue: number
+}
+
 export interface GameState {
   tick: number
   speed: GameSpeed
@@ -254,6 +267,12 @@ export interface GameState {
   companyRevenue: number
   // Convoys currently en route to market; arrive with Revenue after transit
   pendingConvoys: ConvoyOrder[]
+  // Lifetime ledger — totals since game start (do not decay when Revenue is spent)
+  totalRubberExported: number
+  totalIvoryExported: number
+  lifetimeRevenueEarned: number
+  // Rolling event log — last ~20 economic events for HUD toasts + ledger history
+  economicEvents: EconomicEvent[]
   selectedNodeId: string | null
   selectedEdgeId: string | null
   selectedShipId: string | null

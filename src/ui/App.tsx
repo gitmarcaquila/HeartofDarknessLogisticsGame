@@ -4,6 +4,7 @@ import { PixiRenderer } from '../renderer/PixiRenderer'
 import { Toolbar } from './Toolbar'
 import { Sidebar } from './Sidebar'
 import { FleetPanel } from './FleetPanel'
+import { ShipyardPanel } from './ShipyardPanel'
 
 const TICK_INTERVALS: Record<number, number> = {
   0: 0,
@@ -13,7 +14,8 @@ const TICK_INTERVALS: Record<number, number> = {
 }
 
 export function App() {
-  const [fleetOpen, setFleetOpen] = useState(false)
+  const [fleetOpen,    setFleetOpen]    = useState(false)
+  const [shipyardOpen, setShipyardOpen] = useState(false)
   const containerRef   = useRef<HTMLDivElement>(null)
   const rendererRef    = useRef<PixiRenderer | null>(null)
   const tickIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -65,8 +67,14 @@ export function App() {
   return (
     <div style={{ width: '100%', height: '100%', position: 'relative', fontFamily: 'monospace' }}>
       <div ref={containerRef} style={{ width: '100%', height: '100%' }} />
-      <Toolbar onToggleFleet={() => setFleetOpen(o => !o)} fleetOpen={fleetOpen} />
-      {fleetOpen && <FleetPanel onClose={() => setFleetOpen(false)} />}
+      <Toolbar
+        onToggleFleet={() => { setFleetOpen(o => !o); setShipyardOpen(false) }}
+        fleetOpen={fleetOpen}
+        onToggleShipyard={() => { setShipyardOpen(o => !o); setFleetOpen(false) }}
+        shipyardOpen={shipyardOpen}
+      />
+      {fleetOpen    && <FleetPanel    onClose={() => setFleetOpen(false)} />}
+      {shipyardOpen && <ShipyardPanel onClose={() => setShipyardOpen(false)} />}
       <Sidebar />
     </div>
   )
