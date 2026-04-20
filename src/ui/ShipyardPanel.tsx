@@ -87,7 +87,7 @@ export function ShipyardPanel({ onClose }: { onClose: () => void }) {
             Treasury
           </div>
           <div style={{ fontSize: 18, color: '#f59e0b', fontWeight: 700 }}>
-            ₪ {Math.round(companyRevenue)}
+            💰 {Math.round(companyRevenue)}
           </div>
         </div>
         <div style={{ textAlign: 'right' }}>
@@ -137,7 +137,7 @@ export function ShipyardPanel({ onClose }: { onClose: () => void }) {
               </div>
               <div style={{ display: 'flex', gap: 10, fontSize: 10 }}>
                 <span style={{ color: companyRevenue >= revCost ? '#f59e0b' : '#7f1d1d' }}>
-                  ₪ {revCost}
+                  💰 {revCost}
                 </span>
                 <span style={{ color: '#6b7280' }}>+ {costLabel}</span>
                 <span style={{ color: '#4b5563' }}>· upkeep {SHIP_UPKEEP_FOOD[type]} food/t</span>
@@ -197,7 +197,7 @@ export function ShipyardPanel({ onClose }: { onClose: () => void }) {
                 {convoy.rubber > 0 && `🌿 ${convoy.rubber} `}
                 {convoy.ivory  > 0 && `🦷 ${convoy.ivory}`}
               </span>
-              <span style={{ color: '#f59e0b' }}>+₪ {convoy.revenueDue}</span>
+              <span style={{ color: '#f59e0b' }}>+💰 {convoy.revenueDue}</span>
               <span style={{ color: '#6b7280' }}>{convoy.ticksRemaining}t</span>
             </div>
           ))}

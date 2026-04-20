@@ -1,5 +1,5 @@
 import { useGameStore } from '../store/gameStore'
-import { RiverNode, RiverEdge, Ship, ResourceType, CargoPriority, RESOURCE_TYPES } from '../engine/types'
+import { RiverNode, RiverEdge, Ship, ResourceType, CargoPriority, RESOURCE_TYPES, OfficerRole, EMERGENCY_DISPATCH_PAYLOAD, EMERGENCY_DISPATCH_REVENUE_COST } from '../engine/types'
 
 // ─── Shared primitives ────────────────────────────────────────────────────────
 
@@ -256,11 +256,11 @@ function CompanyLedger() {
       <div style={{ padding: '8px 10px', background: '#111827', border: '1px solid #1f2937', borderRadius: 6, marginBottom: 8 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 4 }}>
           <span style={{ color: '#9ca3af' }}>Treasury</span>
-          <span style={{ color: '#f59e0b', fontWeight: 700 }}>₪ {Math.round(companyRevenue)}</span>
+          <span style={{ color: '#f59e0b', fontWeight: 700 }}>💰 {Math.round(companyRevenue)}</span>
         </div>
         <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 4 }}>
           <span style={{ color: '#9ca3af' }}>Revenue earned</span>
-          <span style={{ color: '#e5e7eb' }}>₪ {Math.round(lifetimeRevenueEarned)}</span>
+          <span style={{ color: '#e5e7eb' }}>💰 {Math.round(lifetimeRevenueEarned)}</span>
         </div>
         <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 4 }}>
           <span style={{ color: '#9ca3af' }}>Rubber exported</span>
@@ -275,11 +275,118 @@ function CompanyLedger() {
   )
 }
 
+// ─── Officer row (stationed here) ─────────────────────────────────────────────
+
+const ROLE_EFFECT: Record<OfficerRole, string> = {
+  logistics:  'Cuts port corruption 60%',
+  military:   'Suppresses edge instability',
+  diplomatic: 'Erodes native authority 2×',
+  medical:    'Morale +0.3/tick at this port',
+}
+
+const ROLE_COLOR: Record<OfficerRole, string> = {
+  logistics:  '#10b981',
+  military:   '#ef4444',
+  diplomatic: '#8b5cf6',
+  medical:    '#06b6d4',
+}
+
+function StationedOfficerRow({ officer, currentNodeId }: {
+  officer: { id: string; name: string; role: OfficerRole; morale: number; loyalty: number }
+  currentNodeId: string
+}) {
+  const nodes           = useGameStore(s => s.nodes)
+  const transferOfficer = useGameStore(s => s.transferOfficer)
+
+  const others = Object.values(nodes).filter(n => n.id !== currentNodeId)
+
+  return (
+    <div style={{ marginBottom: 6, padding: '8px 10px', background: '#1f2937', borderRadius: 4, border: `1px solid ${ROLE_COLOR[officer.role]}22` }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <span style={{ fontSize: 11, color: '#e5e7eb' }}>{officer.name}</span>
+        <span style={{ fontSize: 9, color: ROLE_COLOR[officer.role], textTransform: 'uppercase', letterSpacing: 1 }}>
+          {officer.role}
+        </span>
+      </div>
+      <div style={{ fontSize: 9, color: '#6b7280', marginTop: 2 }}>
+        {ROLE_EFFECT[officer.role]}
+      </div>
+      <select
+        value=""
+        onChange={e => { if (e.target.value) transferOfficer(officer.id, e.target.value) }}
+        style={{
+          width: '100%', marginTop: 6, padding: '3px 6px',
+          background: '#0d1117', border: '1px solid #374151', borderRadius: 3,
+          color: '#9ca3af', fontSize: 10, fontFamily: 'monospace', cursor: 'pointer',
+        }}
+      >
+        <option value="">Transfer to…</option>
+        {others.map(n => <option key={n.id} value={n.id}>{n.name}</option>)}
+      </select>
+    </div>
+  )
+}
+
+// ─── Emergency Dispatch button ────────────────────────────────────────────────
+
+function EmergencyDispatchButton({ node }: { node: RiverNode }) {
+  const origin            = useGameStore(s => s.nodes['origin'])
+  const companyRevenue    = useGameStore(s => s.companyRevenue)
+  const emergencyDispatch = useGameStore(s => s.emergencyDispatch)
+
+  const hasRevenue = companyRevenue >= EMERGENCY_DISPATCH_REVENUE_COST
+  const hasStock   = Object.entries(EMERGENCY_DISPATCH_PAYLOAD).every(
+    ([r, v]) => (origin?.stockpile[r as ResourceType] ?? 0) >= (v ?? 0)
+  )
+  const canAfford = hasRevenue && hasStock
+
+  const payloadLabel = Object.entries(EMERGENCY_DISPATCH_PAYLOAD)
+    .map(([r, v]) => `${v} ${r === 'food' ? 'food' : r === 'medicine' ? 'med' : 'ammo'}`)
+    .join(' + ')
+
+  return (
+    <>
+      <SectionLabel>Crisis Response</SectionLabel>
+      <button
+        onClick={() => { if (canAfford) emergencyDispatch(node.id) }}
+        disabled={!canAfford}
+        style={{
+          width: '100%', padding: '8px 10px', fontSize: 11, fontFamily: 'monospace',
+          cursor: canAfford ? 'pointer' : 'default',
+          background: canAfford ? '#7c2d12' : '#1f2937',
+          color:      canAfford ? '#fed7aa' : '#4b5563',
+          border: `1px solid ${canAfford ? '#9a3412' : '#374151'}`,
+          borderRadius: 4,
+          textAlign: 'left',
+        }}>
+        <div style={{ fontWeight: 700 }}>🚨 Emergency Dispatch</div>
+        <div style={{ fontSize: 9, marginTop: 3, opacity: 0.8 }}>
+          {canAfford
+            ? `Relief canoe with ${payloadLabel} — 💰 ${EMERGENCY_DISPATCH_REVENUE_COST}`
+            : !hasRevenue ? `Need 💰 ${EMERGENCY_DISPATCH_REVENUE_COST} (have ${Math.round(companyRevenue)})`
+            : 'Origin lacks payload stock'}
+        </div>
+      </button>
+    </>
+  )
+}
+
 // ─── Node Panel ───────────────────────────────────────────────────────────────
 
 function NodePanel({ node }: { node: RiverNode }) {
-  const officers = useGameStore(s => s.officers)
+  const officers     = useGameStore(s => s.officers)
   const nodeOfficers = node.officers.map(id => officers[id]).filter(Boolean)
+
+  // Officers currently en route to this node
+  const incomingOfficers = Object.values(officers).filter(
+    o => o.state === 'in_transit' && o.destinationId === node.id
+  )
+
+  // Crisis signal: any resource with demand > 0 and less than 10 days supply
+  const inCrisis = RESOURCE_TYPES.some(r => {
+    const netBurn = node.demand[r] - node.production[r]
+    return netBurn > 0 && node.stockpile[r] / netBurn < 10
+  })
 
   return (
     <div>
@@ -344,17 +451,29 @@ function NodePanel({ node }: { node: RiverNode }) {
         </>
       )}
 
-      {nodeOfficers.length > 0 && (
+      {(nodeOfficers.length > 0 || incomingOfficers.length > 0) && (
         <>
           <SectionLabel>Officers</SectionLabel>
           {nodeOfficers.map(off => (
-            <div key={off.id} style={{ marginBottom: 6, padding: '6px 8px', background: '#1f2937', borderRadius: 4 }}>
-              <div style={{ fontSize: 11, color: '#e5e7eb' }}>{off.name}</div>
-              <div style={{ fontSize: 10, color: '#6b7280' }}>{off.role} · morale {off.morale}</div>
+            <StationedOfficerRow key={off.id} officer={off} currentNodeId={node.id} />
+          ))}
+          {incomingOfficers.map(off => (
+            <div key={off.id} style={{ marginBottom: 6, padding: '6px 10px', background: '#0d1117', border: '1px dashed #374151', borderRadius: 4 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: 11, color: '#9ca3af' }}>{off.name}</span>
+                <span style={{ fontSize: 9, color: '#06b6d4', textTransform: 'uppercase', letterSpacing: 1 }}>
+                  ● in transit
+                </span>
+              </div>
+              <div style={{ fontSize: 9, color: '#6b7280', marginTop: 2 }}>
+                Arrives in {off.transitTicksRemaining ?? '?'}t · {off.role}
+              </div>
             </div>
           ))}
         </>
       )}
+
+      {!node.isCapital && inCrisis && <EmergencyDispatchButton node={node} />}
 
       {node.isCapital && <CompanyLedger />}
     </div>

@@ -236,6 +236,20 @@ export const IVORY_REVENUE_VALUE         = 5   // Revenue per unit of ivory expo
 export const MAX_CONVOY_RUBBER           = 80  // max rubber loaded per convoy
 export const MAX_CONVOY_IVORY            = 40  // max ivory loaded per convoy
 
+// Officer transfer: ticks per hop along the shortest graph path
+export const OFFICER_TICKS_PER_HOP = 4
+
+// Emergency Dispatch: one-way canoe run to a port in crisis
+export const EMERGENCY_DISPATCH_REVENUE_COST = 20
+export const EMERGENCY_DISPATCH_PAYLOAD: Partial<ResourceStock> = {
+  food:        15,
+  medicine:    5,
+  ammunition:  8,
+}
+
+// Medical officer morale contribution at stationed node
+export const MEDICAL_OFFICER_MORALE_BONUS = 0.3
+
 // ─── Game State ───────────────────────────────────────────────────────────────
 
 export type OverlayMode = 'trade' | 'influence' | 'instability' | 'personnel'

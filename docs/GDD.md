@@ -219,16 +219,28 @@ Population growth, migration, and disease mechanics are planned for a future ite
 
 ### 7. Officers
 
-Officers are personnel stationed at nodes or in transit between them.
+Officers are personnel stationed at nodes or in transit between them. Every role has a concrete mechanical effect — there are no "planned" roles.
 
-| Role | Effect |
-|------|--------|
-| Logistics | Improves loading/unloading efficiency (planned) |
-| Military | Reduces edge instability when stationed at destination node |
-| Diplomatic | Improves influence projection (planned) |
-| Medical | Reduces morale damage from disease events (planned) |
+| Role | Effect when `stationed` |
+|------|--------------------------|
+| **Logistics** | Cuts port corruption tax by 60% at this node. A stationed logistics officer at a corrupt port means a much larger share of delivered cargo actually lands in the stockpile. |
+| **Military** | Suppresses instability growth on edges whose destination is this node — reduces ambush chance on the approach. |
+| **Diplomatic** | Doubles the rate at which Company influence erodes native authority at this node. Useful where `nativeInfluence > 50`. |
+| **Medical** | Adds +0.3/tick to morale while stationed — same weight as `medicineMet`. |
 
-Officers can be transferred between nodes and spend ticks in transit.
+**Transfer:**
+Any `stationed` officer can be transferred from a node's sidebar panel via a "Transfer to…" dropdown. Transfer time = **BFS-shortest-path hops × 4 ticks/hop** — e.g. origin → Inner Station is 4 hops × 4 = 16 ticks. While in transit:
+- Officer `state` is `'in_transit'`, no effect anywhere
+- Destination node's panel shows the officer arriving with ticks remaining
+- Transfer cannot be cancelled mid-route (simpler to reason about)
+
+**Why hops, not edge resistance?**
+Officers don't travel by ship — they take whatever path is available (smaller boats, overland, dispatch). Path length is a fair abstraction that's easy to explain. Resistance is a ship/cargo concern, not a personnel concern.
+
+**Officer fields that exist but are not yet mechanically active:**
+- `officer.morale`, `officer.loyalty` — displayed in flavour but no downstream effect
+- `officer.state === 'sick'` or `'defected'` — never entered by current simulation
+These are reserved for a later pass that adds disease, recruitment, and defection mechanics.
 
 ### 8. Instability, Control & Route Disruption
 
@@ -267,7 +279,7 @@ The HUD at the top of the screen is the player's economic dashboard. It must com
 INTO THE CURRENT | Day N | ⏸▶▶▶ | Trade/Influence/Instability/Personnel |
 ⛵ Fleet [badge]  ⚒ Shipyard [badge] |
 🌾 Food total   🌿 Rubber total   🦷 Ivory total |
-₪ Company Revenue
+💰 Company Revenue
 ```
 
 **Separation of Fleet and Shipyard:**
@@ -288,17 +300,17 @@ The Shipyard lives in its own side panel (opened from the toolbar), not as a sec
 | 🌾 Food | Per-port rows: Name, Stockpile, Net/tick (green positive / red negative). Only ports with nonzero data are listed. |
 | 🌿 Rubber | Same format — production/stockpile per port. Quickly reveals where extraction is happening vs. where stockpiles are sitting. |
 | 🦷 Ivory | Same as Rubber. |
-| ₪ Revenue | Treasury, lifetime earned, revenue in transit, and a mini-list of up to 5 convoys en route (goods + revenue + ticks remaining). |
+| 💰 Revenue | Treasury, lifetime earned, revenue in transit, and a mini-list of up to 5 convoys en route (goods + revenue + ticks remaining). |
 
 Tooltips follow the cursor and dismiss on mouse-leave. Minimum width 220 px; never block more than 340 px of the screen. They are read-only — they do not contain interactive elements. For anything clickable, route the player to Fleet, Shipyard, or the Sidebar.
 
 **Convoy event signaling:**
 Trade convoys departing and arriving are important story beats — they're the moment the extraction economy pays off. Two redundant signals, one kinesthetic and one narrative:
 
-1. **Revenue pulse** — when a convoy arrives, the ₪ counter briefly flashes bright yellow with a glow for ~1.2 seconds. Gives immediate feedback on a numerical change that might otherwise be easy to miss.
+1. **Revenue pulse** — when a convoy arrives, the 💰 counter briefly flashes bright yellow with a glow for ~1.2 seconds. Gives immediate feedback on a numerical change that might otherwise be easy to miss.
 2. **Toast notification** — top-center of the screen, 3–4 seconds, colour-coded:
-   - `convoy_departed` (lime): "Trade Convoy departed with 80 rubber + 40 ivory · ₪360 expected"
-   - `convoy_arrived` (amber): "Convoy returned from market: +₪360 banked"
+   - `convoy_departed` (lime): "Trade Convoy departed with 80 rubber + 40 ivory · 💰360 expected"
+   - `convoy_arrived` (amber): "Convoy returned from market: +💰360 banked"
 
 Events are logged to a rolling 20-item `economicEvents` array in GameState. The toast system watches this array and shows any event it hasn't rendered yet, purging toasts older than 4.5 seconds.
 
@@ -308,7 +320,7 @@ When the player clicks Company Station, the sidebar shows a "Company Ledger" sec
 | Metric | Meaning |
 |--------|---------|
 | **Treasury** | Current spendable Company Revenue |
-| **Revenue earned** | Lifetime ₪ from completed convoys (does not decay when ships are built) |
+| **Revenue earned** | Lifetime 💰 from completed convoys (does not decay when ships are built) |
 | **Rubber exported** | Lifetime rubber sent out via convoys + rolling rate per 100 ticks |
 | **Ivory exported** | Lifetime ivory sent out via convoys + rolling rate per 100 ticks |
 
@@ -316,6 +328,29 @@ These metrics answer the strategic question *"Is my extraction pipeline profitab
 
 **Why information on hover, not on a permanent dashboard?**
 The map + overlay layers are the primary visual channel. A permanent stats dashboard would eat canvas real estate and train the player to read numbers instead of watching ship icons. Tooltips give access on demand without displacing the game view.
+
+### 11. Crisis Response — Emergency Dispatch
+
+When a port falls into acute shortage, the player needs a lever that's faster than the normal build → assign → transit loop. **Emergency Dispatch** is that lever.
+
+**Trigger condition (UI):**
+The port's sidebar panel shows a `🚨 Emergency Dispatch` button **only** when the port has a resource with `stockpile / (demand − production) < 10` — i.e. less than 10 days of supply. The button is hidden otherwise to avoid training players to use it routinely.
+
+**Action:**
+Clicking dispatches a pre-loaded War Canoe from origin on a one-way relief run:
+- **Cost:** 💰 20 Revenue + payload from origin stockpile (15 food + 5 medicine + 8 ammunition)
+- **Path:** BFS-shortest from origin to target
+- **Behaviour:** canoe travels the path with the pre-loaded cargo, unloads at the terminus, then becomes `unassigned` at the destination (the temporary emergency route is deleted)
+- **Corruption still applies:** a corrupt port still skims part of the delivery. Logistics officers there still mitigate it. This is intentional — emergency aid is not immune to systemic rot.
+
+**Why canoes?**
+War Canoes are fast (0.25/tick) with small holds (cap 20). That's exactly the profile of emergency response — a quick surge of relief supplies, not a sustained pipeline. The emergency dispatch UX implicitly frames canoes as the crisis-response ship class.
+
+**Why one-way?**
+A permanent route would require the player to manage it afterwards. The one-way-then-unassigned model means the canoe becomes a free ship the player can reassign wherever it's needed next — potentially to a different crisis or to a real route.
+
+**Why cost Revenue, not just resources?**
+The Revenue cost puts emergency dispatch in the same economic loop as ship commissioning — it competes with fleet growth. A player who burns Revenue on relief runs cannot also commission new steamers. This makes crisis response a strategic trade, not a free escape hatch.
 
 ---
 
@@ -363,9 +398,9 @@ steamer:                0.18    (~6 ticks; 14 ticks on Inner Station edge)
 barge:                  0.14    (~7 ticks) [was 0.10 before 2026-03-30]
 
 // Ship build cost (resources + Company Revenue)
-canoe:   5 food                     + ₪10 Revenue
-steamer: 15 food, 8 ammo            + ₪30 Revenue
-barge:   25 food, 10 rubber         + ₪60 Revenue
+canoe:   5 food                     + 💰10 Revenue
+steamer: 15 food, 8 ammo            + 💰30 Revenue
+barge:   25 food, 10 rubber         + 💰60 Revenue
 
 // Ship upkeep (food/tick drained from origin per active assigned ship)
 canoe: 0.05    steamer: 0.15    barge: 0.25
@@ -415,8 +450,8 @@ food: 40    medicine: 6    ammunition: 10
 // Export convoy (rubber/ivory → Company Revenue)
 convoyInterval:    60 ticks between departures from origin
 convoyTransit:     40 ticks for revenue to arrive (ocean voyage + sale)
-rubberValue:       ₪2 per unit     maxConvoyRubber: 80
-ivoryValue:        ₪5 per unit     maxConvoyIvory:  40
+rubberValue:       💰2 per unit     maxConvoyRubber: 80
+ivoryValue:        💰5 per unit     maxConvoyIvory:  40
 ```
 
 ---
@@ -461,6 +496,10 @@ ivoryValue:        ₪5 per unit     maxConvoyIvory:  40
 - [x] HUD tooltips on resource totals and Revenue (per-port stockpile/net, convoys en route)
 - [x] Convoy event toasts (departed/arrived) + Revenue counter pulse on arrival
 - [x] Company Ledger on Company Station panel: treasury, lifetime earned, lifetime exports, export rate per 100t
+- [x] Officer transfer UI — per-officer dropdown in node sidebar; transit time = path hops × 4
+- [x] Incoming officer display — destination node shows officers arriving with ticks remaining
+- [x] Logistics / Military / Diplomatic / Medical officers all have concrete stationed effects
+- [x] Emergency Dispatch — one-way relief canoe to any port in crisis (auto-shown when <10d supply)
 
 ### Planned
 

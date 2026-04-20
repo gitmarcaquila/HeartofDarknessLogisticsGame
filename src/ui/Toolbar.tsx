@@ -106,14 +106,14 @@ function useConvoyToasts(events: EconomicEvent[]): Toast[] {
           .filter(Boolean).join(' + ')
         newToasts.push({
           id: ev.id,
-          text: `Trade Convoy departed with ${goods} · ₪${ev.revenue} expected`,
+          text: `Trade Convoy departed with ${goods} · 💰${ev.revenue} expected`,
           color: '#a3e635',
           tickSeen: Date.now(),
         })
       } else if (ev.type === 'convoy_arrived') {
         newToasts.push({
           id: ev.id,
-          text: `Convoy returned from market: +₪${ev.revenue} banked`,
+          text: `Convoy returned from market: +💰${ev.revenue} banked`,
           color: '#f59e0b',
           tickSeen: Date.now(),
         })
@@ -174,15 +174,15 @@ function RevenueTooltip() {
       <div style={{ fontSize: 12, color: '#f59e0b', fontWeight: 700, marginBottom: 8 }}>Company Revenue</div>
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
         <span style={{ color: '#9ca3af' }}>Treasury</span>
-        <span style={{ color: '#f59e0b' }}>₪ {Math.round(companyRevenue)}</span>
+        <span style={{ color: '#f59e0b' }}>💰 {Math.round(companyRevenue)}</span>
       </div>
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
         <span style={{ color: '#9ca3af' }}>Lifetime earned</span>
-        <span>₪ {Math.round(lifetimeRevenueEarned)}</span>
+        <span>💰 {Math.round(lifetimeRevenueEarned)}</span>
       </div>
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
         <span style={{ color: '#9ca3af' }}>In transit</span>
-        <span style={{ color: '#a3e635' }}>₪ {pendingRevenue}</span>
+        <span style={{ color: '#a3e635' }}>💰 {pendingRevenue}</span>
       </div>
       {pendingConvoys.length > 0 && (
         <>
@@ -192,7 +192,7 @@ function RevenueTooltip() {
               <span style={{ color: '#6b7280' }}>
                 {c.rubber > 0 && `🌿${c.rubber} `}{c.ivory > 0 && `🦷${c.ivory}`}
               </span>
-              <span style={{ color: '#a3e635' }}>₪{c.revenueDue}</span>
+              <span style={{ color: '#a3e635' }}>💰{c.revenueDue}</span>
               <span style={{ color: '#6b7280' }}>{c.ticksRemaining}t</span>
             </div>
           ))}
@@ -343,7 +343,7 @@ export function Toolbar({
             textShadow: pulseRevenue ? '0 0 8px rgba(253,224,71,0.8)' : 'none',
             transition: 'color 0.2s, text-shadow 0.2s',
           }}>
-            ₪ {Math.round(companyRevenue)}
+            💰 {Math.round(companyRevenue)}
             <span style={{ fontSize: 9, color: '#6b7280', fontWeight: 400, marginLeft: 4 }}>Revenue</span>
           </span>
         </HoverStat>

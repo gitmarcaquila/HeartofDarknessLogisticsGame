@@ -6,10 +6,43 @@ import {
   DEMAND_RATE_PER_POP,
   EXPORT_CONVOY_INTERVAL, EXPORT_CONVOY_TRANSIT_TICKS,
   RUBBER_REVENUE_VALUE, IVORY_REVENUE_VALUE, MAX_CONVOY_RUBBER, MAX_CONVOY_IVORY,
+  OFFICER_TICKS_PER_HOP,
+  EMERGENCY_DISPATCH_REVENUE_COST, EMERGENCY_DISPATCH_PAYLOAD,
+  MEDICAL_OFFICER_MORALE_BONUS,
   CargoPriority, BuildOrder, getStockpileCap, getBerthLimit,
 } from './types'
 
 const MAX_EVENT_LOG = 20
+
+// ─── Graph helpers ────────────────────────────────────────────────────────────
+
+// BFS shortest-path between two nodes, treating every edge as bidirectional
+// (edge.flowDirection === 'downstream' is currently the only restricted case,
+// but officers and emergency canoes can travel against the current).
+// Returns an array of node ids including both endpoints, or null if unreachable.
+export function findShortestPath(
+  state: GameState, fromId: string, toId: string
+): string[] | null {
+  if (fromId === toId) return [fromId]
+  const neighbors: Record<string, string[]> = {}
+  for (const e of Object.values(state.edges)) {
+    ;(neighbors[e.fromId] ??= []).push(e.toId)
+    ;(neighbors[e.toId]   ??= []).push(e.fromId)
+  }
+  const visited = new Set<string>([fromId])
+  const queue: { id: string; path: string[] }[] = [{ id: fromId, path: [fromId] }]
+  while (queue.length) {
+    const { id, path } = queue.shift()!
+    for (const n of neighbors[id] ?? []) {
+      if (visited.has(n)) continue
+      visited.add(n)
+      const nextPath = [...path, n]
+      if (n === toId) return nextPath
+      queue.push({ id: n, path: nextPath })
+    }
+  }
+  return null
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -229,6 +262,20 @@ function tickUnloading(ship: Ship, route: TradeRoute, state: GameState): void {
 function tickLoading(ship: Ship, route: TradeRoute, state: GameState): void {
   ship.dockedTicksRemaining--
   if (ship.dockedTicksRemaining > 0) return
+
+  // Emergency one-way delivery: on arrival at the terminus, retire the canoe
+  // and delete the temporary route instead of reloading for a return leg.
+  if (route.id.startsWith('emergency_') &&
+      ship.locationNodeId === route.nodePath[route.nodePath.length - 1]) {
+    ship.state            = 'unassigned'
+    ship.assignedRouteId  = undefined
+    ship.currentEdgeId    = undefined
+    ship.edgeProgress     = 0
+    ship.recentlyUnloaded = {}
+    ship.eventNote        = 'Emergency delivery complete'
+    delete state.routes[route.id]
+    return
+  }
 
   const node = state.nodes[ship.locationNodeId]
   if (node) {
@@ -471,12 +518,19 @@ function tickMorale(state: GameState): void {
     // ── Factor 4: Instability ────────────────────────────────────────────────
     const stableBonus = node.instability < 30 ? 0.1 : node.instability > 55 ? -0.2 : 0
 
+    // ── Factor 5: Medical officer on station (welfare / morale bonus) ───────
+    const hasMedical = node.officers.some(id => {
+      const off = state.officers[id]
+      return off?.role === 'medical' && off.state === 'stationed'
+    })
+
     // ── Flat morale delta ────────────────────────────────────────────────────
     let delta = 0
     delta += foodMet     ?  0.5 : -1.5   // food is the biggest driver
     delta += medicineMet ?  0.3 : -0.8   // medicine second
     delta += isExporting ?  0.2 : -0.2   // exports (neutral if no production)
     delta += stableBonus                  // instability modifier
+    if (hasMedical) delta += MEDICAL_OFFICER_MORALE_BONUS
 
     node.morale = Math.max(0, Math.min(100, node.morale + delta))
 
@@ -754,6 +808,115 @@ export function actionDeleteRoute(state: GameState, routeId: string): Partial<Ga
   }
   delete routes[routeId]
   return { routes, ships }
+}
+
+// ─── Officer transfer ─────────────────────────────────────────────────────────
+
+export function actionTransferOfficer(
+  state: GameState, officerId: string, destinationId: string
+): Partial<GameState> {
+  const officer = state.officers[officerId]
+  if (!officer) return {}
+  if (officer.state !== 'stationed') return {}        // can't move someone already in transit
+  if (officer.locationId === destinationId) return {} // no-op
+
+  const path = findShortestPath(state, officer.locationId, destinationId)
+  if (!path || path.length < 2) return {}             // unreachable
+
+  const hops        = path.length - 1
+  const transitTime = hops * OFFICER_TICKS_PER_HOP
+
+  const officers = structuredClone(state.officers)
+  const nodes    = structuredClone(state.nodes)
+
+  // Remove officer from origin node's officers list
+  const origin = nodes[officer.locationId]
+  if (origin) origin.officers = origin.officers.filter(id => id !== officerId)
+
+  // Put officer into transit
+  officers[officerId] = {
+    ...officer,
+    state:                  'in_transit',
+    destinationId,
+    transitTicksRemaining:  transitTime,
+  }
+
+  return { officers, nodes }
+}
+
+// ─── Emergency Dispatch ───────────────────────────────────────────────────────
+
+let _emergencyCounter = 0
+
+export function actionEmergencyDispatch(
+  state: GameState, targetNodeId: string
+): Partial<GameState> {
+  if (targetNodeId === 'origin') return {}
+  const origin = state.nodes['origin']
+  const target = state.nodes[targetNodeId]
+  if (!origin || !target) return {}
+
+  // Affordability: Revenue + resource payload from origin stockpile
+  if (state.companyRevenue < EMERGENCY_DISPATCH_REVENUE_COST) return {}
+  for (const [r, v] of Object.entries(EMERGENCY_DISPATCH_PAYLOAD)) {
+    if (origin.stockpile[r as ResourceType] < (v ?? 0)) return {}
+  }
+
+  // Reachable path
+  const path = findShortestPath(state, 'origin', targetNodeId)
+  if (!path || path.length < 2) return {}
+
+  // Build the new state — deduct cost, create route, create pre-loaded canoe
+  const nodes  = structuredClone(state.nodes)
+  const ships  = structuredClone(state.ships)
+  const routes = structuredClone(state.routes)
+
+  for (const [r, v] of Object.entries(EMERGENCY_DISPATCH_PAYLOAD)) {
+    nodes['origin'].stockpile[r as ResourceType] -= (v ?? 0)
+  }
+
+  const emergencyId = `emergency_${target.id}_${state.tick}_${++_emergencyCounter}`
+  const canoeId     = nextShipId()
+
+  // Pre-loaded cargo for the canoe — skips normal loading pass via 'none' priorities
+  const cargo: ResourceStock = EMPTY_STOCK()
+  for (const [r, v] of Object.entries(EMERGENCY_DISPATCH_PAYLOAD)) {
+    cargo[r as ResourceType] = (v ?? 0)
+  }
+
+  routes[emergencyId] = {
+    id:       emergencyId,
+    name:     `🚨 Relief run → ${target.name}`,
+    nodePath: path,
+    shipIds:  [canoeId],
+    cargoPriorities: {
+      food: 'none', medicine: 'none', rubber: 'none', ivory: 'none', ammunition: 'none',
+    },
+    lastTickThroughput: EMPTY_STOCK(),
+  }
+
+  ships[canoeId] = {
+    id:                   canoeId,
+    name:                 'Relief Canoe',
+    type:                 'canoe',
+    state:                'docked_loading',
+    locationNodeId:       'origin',
+    edgeProgress:         0,
+    assignedRouteId:      emergencyId,
+    routeNodeIndex:       1,
+    routeDirection:       1,
+    cargo,
+    capacity:             SHIP_CAPACITY.canoe,
+    dockedTicksRemaining: 1,
+    recentlyUnloaded:     {},
+  }
+
+  return {
+    nodes,
+    ships,
+    routes,
+    companyRevenue: state.companyRevenue - EMERGENCY_DISPATCH_REVENUE_COST,
+  }
 }
 
 // suppress unused import warning

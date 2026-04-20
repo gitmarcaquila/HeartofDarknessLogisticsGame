@@ -10,6 +10,8 @@ import {
   actionSetCargoPriority,
   actionAddRoute,
   actionDeleteRoute,
+  actionTransferOfficer,
+  actionEmergencyDispatch,
 } from '../engine/ResourceFlow'
 
 type ShipType = 'canoe' | 'steamer' | 'barge'
@@ -31,6 +33,9 @@ interface GameStore extends GameState {
   addRoute:    (name: string, nodePath: string[]) => void
   deleteRoute: (routeId: string) => void
 
+  // Personnel & crisis response
+  transferOfficer:   (officerId: string, destinationId: string) => void
+  emergencyDispatch: (targetNodeId: string) => void
 }
 
 export const useGameStore = create<GameStore>((set, get) => ({
@@ -64,4 +69,10 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
   deleteRoute: routeId =>
     set(state => actionDeleteRoute(state, routeId) as GameStore),
+
+  transferOfficer: (officerId, destinationId) =>
+    set(state => actionTransferOfficer(state, officerId, destinationId) as GameStore),
+
+  emergencyDispatch: targetNodeId =>
+    set(state => actionEmergencyDispatch(state, targetNodeId) as GameStore),
 }))
